@@ -1,5 +1,4 @@
 from __future__ import annotations
-
 import json
 import sys
 from pathlib import Path
@@ -30,7 +29,6 @@ def main(
     split: str = "dev",
     dataset_languages: str | list[str] | None = None,
     eval_languages: str | list[str] | None = None,
-    cache_dir: str | None = None,
     max_texts: int | None = None,
     layer: int = -1,
     batch_size: int = 32,
@@ -51,7 +49,7 @@ def main(
     validate_choices("metrics", metrics, METRICS)
 
     for dataset_name in datasets:
-        texts = load_texts(dataset_name, split, dataset_languages, cache_dir, max_texts)
+        texts = load_texts(dataset_name, split, dataset_languages, max_texts)
         languages = select_languages(texts, eval_languages)
 
         for model_name in models:
@@ -88,14 +86,12 @@ def load_texts(
     dataset_name: str,
     split: str,
     dataset_languages: list[str] | None,
-    cache_dir: str | None,
     max_texts: int | None,
 ) -> list[dict[str, Any]]:
     dataset = load_dataset(
         dataset_name,
         split=split,
         languages=dataset_languages,
-        cache_dir=cache_dir,
     )
     texts = dataset.multiparallel_format()
     if max_texts is not None:
@@ -138,7 +134,7 @@ def embed_texts(
     for language in languages:
         inputs = [text["data"][language] for text in texts]
         encoded = model.encode(inputs, batch_size=batch_size, pooling=pooling)
-        embeddings[language] = encoded.detach().cpu().numpy()
+        embeddings[language] = as_numpy(encoded)
     return embeddings
 
 
@@ -196,6 +192,14 @@ def to_jsonable(value: Any) -> Any:
     if isinstance(value, list):
         return [to_jsonable(item) for item in value]
     return value
+
+
+def as_numpy(value: Any) -> np.ndarray:
+    if isinstance(value, np.ndarray):
+        return value
+    if hasattr(value, "detach"):
+        return value.detach().cpu().numpy()
+    return np.asarray(value)
 
 
 def write_json(path: Path, payload: dict[str, Any]) -> None:
