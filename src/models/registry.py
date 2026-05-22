@@ -4,10 +4,18 @@ from typing import Any
 
 from .base import EmbeddingModel
 from .llama import LlamaEmbeddingModel
+from .mbert import MBertEmbeddingModel
+from .mistral import MistralEmbeddingModel
+from .openai_text_embedding import OpenAITextEmbeddingModel
 
 
 MODEL_REGISTRY: dict[str, type[EmbeddingModel]] = {
     "llama": LlamaEmbeddingModel,
+    "mbert": MBertEmbeddingModel,
+    "mistral": MistralEmbeddingModel,
+    "mistral-8b": MistralEmbeddingModel,
+    "openai-large": OpenAITextEmbeddingModel,
+    "openai-text-embedding-large": OpenAITextEmbeddingModel,
 }
 
 
