@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import random
 from collections import defaultdict
-from pathlib import Path
 from typing import Any, Iterable
 
 from .parallel_dataset import FormattedParallelText, ParallelDataset
@@ -21,10 +20,9 @@ class FloresPlus(ParallelDataset):
         self,
         split: str = "dev",
         languages: Iterable[str] | None = None,
-        cache_dir: str | Path | None = None,
         **load_kwargs: Any,
     ):
-        super().__init__(split=split, cache_dir=cache_dir)
+        super().__init__(split=split)
         self.languages = list(languages) if languages is not None else None
         self.load_kwargs = load_kwargs
 
@@ -37,7 +35,6 @@ class FloresPlus(ParallelDataset):
         common_kwargs = {
             "path": self.hf_dataset_name,
             "split": self.split,
-            "cache_dir": self.cache_dir,
             **self.load_kwargs,
         }
 
@@ -97,12 +94,10 @@ class FloresPlus(ParallelDataset):
 def load_floresplus(
     split: str = "dev",
     languages: Iterable[str] | None = None,
-    cache_dir: str | Path | None = None,
     **load_kwargs: Any,
 ) -> list[FormattedParallelText]:
     return FloresPlus(
         split=split,
         languages=languages,
-        cache_dir=cache_dir,
         **load_kwargs,
     ).multiparallel_format()

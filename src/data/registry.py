@@ -2,13 +2,19 @@ from __future__ import annotations
 
 from typing import Any
 
+from .bouquet import Bouquet
 from .floresplus import FloresPlus
 from .parallel_dataset import ParallelDataset, FormattedParallelText
+from .wmt24pp import WMT24PP
 
 
 DATASET_REGISTRY: dict[str, type[ParallelDataset]] = {
+    "bouquet": Bouquet,
+    "facebook/bouquet": Bouquet,
     "floresplus": FloresPlus,
     "flores+": FloresPlus,
+    "wmt24++": WMT24PP,
+    "wmt24pp": WMT24PP,
 }
 
 
