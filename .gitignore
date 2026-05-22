@@ -1,0 +1,4 @@
+outputs/
+slurm_logs/
+slurm_scripts/
+*pycache*/
