@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import random
+import re
 from collections import defaultdict
+from itertools import chain
 from typing import Any, Iterable
 
 from .parallel_dataset import FormattedParallelText, ParallelDataset
@@ -15,6 +17,7 @@ class FloresPlus(ParallelDataset):
     """
 
     hf_dataset_name = "openlanguagedata/flores_plus"
+    language_config_pattern = re.compile(r"^[a-z]{3}_[A-Z][a-z]{3}(?:_[A-Za-z0-9]+)?$")
 
     def __init__(
         self,
@@ -28,7 +31,7 @@ class FloresPlus(ParallelDataset):
 
     def download(self) -> Any:
         try:
-            from datasets import concatenate_datasets, load_dataset
+            from datasets import get_dataset_config_names, load_dataset
         except ImportError as exc:
             raise ImportError("Install `datasets` to download FLORES+: pip install datasets") from exc
 
@@ -38,14 +41,62 @@ class FloresPlus(ParallelDataset):
             **self.load_kwargs,
         }
 
-        if self.languages is None:
-            return load_dataset(**common_kwargs)
+        languages = self._languages(get_dataset_config_names)
 
-        datasets = [
-            load_dataset(name=language, **common_kwargs)
-            for language in self.languages
+        datasets, skipped = self._load_language_datasets(languages, load_dataset, common_kwargs)
+        if not datasets:
+            raise ValueError(f"No FLORES+ languages provide split '{self.split}'.")
+        return self._iter_language_datasets(datasets)
+
+    def _languages(self, get_dataset_config_names: Any) -> list[str]:
+        if self.languages is not None:
+            return self.languages
+
+        return [
+            config
+            for config in get_dataset_config_names(self.hf_dataset_name)
+            if self._is_language_config(config)
         ]
-        return concatenate_datasets(datasets)
+
+    @classmethod
+    def _is_language_config(cls, config: str) -> bool:
+        return bool(cls.language_config_pattern.fullmatch(config))
+
+    @staticmethod
+    def _is_unknown_split_error(exc: ValueError) -> bool:
+        message = str(exc)
+        return "Unknown split" in message and "Should be one of" in message
+
+    def _load_language_datasets(
+        self,
+        languages: Iterable[str],
+        load_dataset: Any,
+        common_kwargs: dict[str, Any],
+    ) -> tuple[list[Any], list[str]]:
+        datasets = []
+        skipped = []
+        for language in languages:
+            try:
+                datasets.append(load_dataset(name=language, **common_kwargs))
+            except ValueError as exc:
+                if not self._is_unknown_split_error(exc):
+                    raise
+                if self.languages is not None:
+                    raise ValueError(
+                        f"FLORES+ language '{language}' does not provide split '{self.split}'."
+                    ) from exc
+                skipped.append(language)
+
+        if skipped:
+            print(
+                f"Skipping {len(skipped)} FLORES+ language(s) without split '{self.split}': "
+                f"{', '.join(skipped)}",
+                flush=True,
+            )
+        return datasets, skipped
+
+    def _iter_language_datasets(self, datasets: Iterable[Iterable[Any]]) -> Iterable[Any]:
+        return chain.from_iterable(datasets)
 
     def multiparallel_format(self) -> list[FormattedParallelText]:
         raw_dataset = self.download()

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from typing import Any, Iterable
 
@@ -10,6 +11,7 @@ class Bouquet(ParallelDataset):
     """facebook/bouquet downloader and formatter."""
 
     hf_dataset_name = "facebook/bouquet"
+    language_config_pattern = re.compile(r"^[a-z]{3}_[A-Z][a-z]{3}$")
 
     def __init__(
         self,
@@ -25,48 +27,48 @@ class Bouquet(ParallelDataset):
 
     def download(self) -> Any:
         try:
-            from datasets import concatenate_datasets, load_dataset
+            from datasets import get_dataset_config_names, load_dataset
         except ImportError as exc:
             raise ImportError("Install `datasets` to download BOUQuET: pip install datasets") from exc
 
-        if self.languages is None:
-            return load_dataset(
-                self.hf_dataset_name,
-                self.config,
-                split=self.split,
-                **self.load_kwargs,
-            )
-
-        datasets = [
-            load_dataset(
+        languages = self._languages(get_dataset_config_names)
+        datasets = []
+        for index, language in enumerate(languages, start=1):
+            print(f"Loading BOUQuET language {index}/{len(languages)}: {language}", flush=True)
+            datasets.append(load_dataset(
                 self.hf_dataset_name,
                 language,
                 split=self.split,
                 **self.load_kwargs,
-            )
-            for language in self.languages
-            if language != "eng_Latn"
+            ))
+        return datasets
+
+    def _languages(self, get_dataset_config_names: Any) -> list[str]:
+        if self.languages is not None:
+            return self.languages
+
+        return [
+            config
+            for config in get_dataset_config_names(self.hf_dataset_name)
+            if self._is_language_config(config)
         ]
-        if not datasets:
-            return load_dataset(
-                self.hf_dataset_name,
-                "eng_Latn",
-                split=self.split,
-                **self.load_kwargs,
-            )
-        return concatenate_datasets(datasets)
+
+    @classmethod
+    def _is_language_config(cls, config: str) -> bool:
+        return bool(cls.language_config_pattern.fullmatch(config))
 
     def multiparallel_format(self) -> list[FormattedParallelText]:
-        raw_dataset = self.download()
+        raw_datasets = self.download()
         grouped: dict[str, dict[str, Any]] = defaultdict(lambda: {"data": {}, "metadata": {}})
 
-        for row in raw_dataset:
-            row_id = str(row["uniq_id"])
-            grouped[row_id]["data"][row["src_lang"]] = row["src_text"]
-            grouped[row_id]["data"][row["tgt_lang"]] = row["tgt_text"]
-            grouped[row_id]["metadata"].setdefault("split", row.get("split", self.split))
-            grouped[row_id]["metadata"].setdefault("source", self.hf_dataset_name)
-            self._add_row_metadata(grouped[row_id]["metadata"], row)
+        for raw_dataset in raw_datasets:
+            for row in raw_dataset:
+                row_id = str(row["uniq_id"])
+                grouped[row_id]["data"][row["src_lang"]] = row["src_text"]
+                grouped[row_id]["data"][row["tgt_lang"]] = row["tgt_text"]
+                grouped[row_id]["metadata"].setdefault("split", row.get("split", self.split))
+                grouped[row_id]["metadata"].setdefault("source", self.hf_dataset_name)
+                self._add_row_metadata(grouped[row_id]["metadata"], row)
 
         return [
             {"id": row_id, "data": values["data"], "metadata": values["metadata"]}
