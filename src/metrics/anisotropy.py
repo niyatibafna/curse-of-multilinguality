@@ -15,7 +15,14 @@ class Anisotropy(COMMetric):
         score = self._score_embeddings(embeddings)
 
         if self.return_details:
-            pass
+            return score, {
+                "num_embeddings": embeddings.shape[0],
+                "embedding_dim": embeddings.shape[1],
+                "num_languages": self.num_languages,
+                "num_concepts": self.num_concepts,
+                "languages": list(self.X.keys()),
+                "normalize": self.normalize,
+            }
 
         return score
 

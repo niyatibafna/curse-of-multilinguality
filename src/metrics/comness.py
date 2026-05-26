@@ -11,6 +11,10 @@ class Comness(COMMetric):
     """
     Multilingual overhead / cross-lingual alignment diagnostic.
 
+    This metric asks: of the effective dimensions spanned by observed
+    variation, what fraction is taken up by language differences rather than
+    concept differences?
+
     Computes:
 
         COM(X) = d_lang / (d_lang + d_concept)
@@ -23,10 +27,29 @@ class Comness(COMMetric):
     relative to concept variation. Large scores mean language variation is
     geometrically complex relative to the semantic concept space.
 
+    The direct implementation would build both displacement matrices M and run
+    SVD on them. That is memory-heavy when there are many languages/concepts.
+    Instead, this code uses the fact that the singular values of the 
+    centered matrix M_c are the square roots of the eigenvalues 
+    of the Gram matrix of the center matrix (M_c.T @ M_c).
+    It accumulates the centered Gram matrix:
+
+        M_c.T @ M_c = M.T @ M - n * mean(M).T @ mean(M)
+
+    and recovers singular values from:
+
+        eigvals(M_c.T @ M_c) = singular_values(M_c)^2
+
     Expected input:
         self.X is a dict mapping language -> array of shape
         (num_concepts, embedding_dim).
     """
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.effective_rank_method = kwargs.get("effective_rank_method", "stable")
+        print(f"Effective rank method: {self.effective_rank_method}")
+        self.singular_value_threshold = kwargs.get("singular_value_threshold", 1e-12)
+        print(f"Singular value threshold: {self.singular_value_threshold}")
 
     def compute(self) -> float | tuple[float, dict[str, Any]]:
         X = self._stack_by_language()
@@ -34,11 +57,11 @@ class Comness(COMMetric):
         if self.normalize:
             X = self._normalize_embeddings(X)
 
-        lang_displacements = self._language_displacements(X)
-        concept_displacements = self._concept_displacements(X)
+        num_language_displacements = self.num_concepts * self._num_pairs(self.num_languages)
+        num_concept_displacements = self.num_languages * self._num_pairs(self.num_concepts)
 
-        d_lang = self._effective_rank(lang_displacements)
-        d_concept = self._effective_rank(concept_displacements)
+        d_lang = self._language_effective_rank(X)
+        d_concept = self._concept_effective_rank(X)
 
         denom = d_lang + d_concept
         score = 0.0 if denom <= np.finfo(float).eps else d_lang / denom
@@ -47,13 +70,13 @@ class Comness(COMMetric):
             details: dict[str, Any] = {
                 "d_lang": d_lang,
                 "d_concept": d_concept,
-                "num_language_displacements": lang_displacements.shape[0],
-                "num_concept_displacements": concept_displacements.shape[0],
+                "num_language_displacements": num_language_displacements,
+                "num_concept_displacements": num_concept_displacements,
                 "num_languages": self.num_languages,
                 "num_concepts": self.num_concepts,
                 "embedding_dim": self.embedding_dim,
                 "languages": list(self.X.keys()),
-                "effective_rank_method": self.kwargs.get("effective_rank_method", "entropy"),
+                "effective_rank_method": self.kwargs.get("effective_rank_method", "stable"),
                 "normalize": self.normalize,
             }
             return score, details
@@ -93,7 +116,7 @@ class Comness(COMMetric):
         norms = np.linalg.norm(X, axis=-1, keepdims=True)
         return X / np.clip(norms, a_min=np.finfo(float).eps, a_max=None)
 
-    def _language_displacements(self, X: np.ndarray) -> np.ndarray:
+    def _language_effective_rank(self, X: np.ndarray) -> float:
         """
         Same-concept cross-lingual displacements:
 
@@ -103,30 +126,22 @@ class Comness(COMMetric):
             (num_concepts * num_language_pairs, embedding_dim)
 
         By default, this uses unordered language pairs l < m because effective
-        rank is unchanged by adding the negated copy of every vector. Set
-        ordered_pairs=True in kwargs to include both l -> m and m -> l.
+        rank is unchanged by adding the negated copy of every vector.
         """
-        ordered_pairs = bool(self.kwargs.get("ordered_pairs", False))
-
-        displacements: list[np.ndarray] = []
-
-        for l in range(self.num_languages):
-            if ordered_pairs:
-                language_range = range(self.num_languages)
-            else:
-                language_range = range(l + 1, self.num_languages)
-
-            for m in language_range:
-                if l == m:
-                    continue
-                displacements.append(X[l] - X[m])
-
-        if not displacements:
+        if self.num_languages < 2:
             raise ValueError("Language displacements require at least two languages.")
 
-        return np.vstack(displacements)
+        # For each concept, accumulate all language-pair displacement moments.
+        accumulator = _DisplacementMoments(self.embedding_dim)
+        weights = self._pair_sum_weights(self.num_languages)
 
-    def _concept_displacements(self, X: np.ndarray) -> np.ndarray:
+        for c in range(self.num_concepts):
+            group = X[:, c, :]
+            accumulator.update_pairwise(group, weights)
+
+        return self._effective_rank_from_moments(accumulator)
+
+    def _concept_effective_rank(self, X: np.ndarray) -> float:
         """
         Same-language concept displacements:
 
@@ -136,35 +151,30 @@ class Comness(COMMetric):
             (num_languages * num_concept_pairs, embedding_dim)
 
         By default, this uses unordered concept pairs c < c' because effective
-        rank is unchanged by adding the negated copy of every vector. Set
-        ordered_pairs=True in kwargs to include both c -> c' and c' -> c.
+        rank is unchanged by adding the negated copy of every vector.
         """
         if self.num_concepts < 2:
             raise ValueError("Concept displacements require at least two concepts.")
 
-        ordered_pairs = bool(self.kwargs.get("ordered_pairs", False))
-        displacements: list[np.ndarray] = []
+        # For each language, accumulate all concept-pair displacement moments.
+        accumulator = _DisplacementMoments(self.embedding_dim)
+        weights = self._pair_sum_weights(self.num_concepts)
 
         for l in range(self.num_languages):
-            for c in range(self.num_concepts):
-                if ordered_pairs:
-                    concept_range = range(self.num_concepts)
-                else:
-                    concept_range = range(c + 1, self.num_concepts)
+            accumulator.update_pairwise(X[l], weights)
 
-                for cp in concept_range:
-                    if c == cp:
-                        continue
-                    displacements.append(X[l, c] - X[l, cp])
+        return self._effective_rank_from_moments(accumulator)
 
-        if not displacements:
-            raise ValueError("Concept displacements require at least two concepts.")
+    def _num_pairs(self, n: int) -> int:
+        return n * (n - 1) // 2
 
-        return np.vstack(displacements)
+    def _pair_sum_weights(self, n: int) -> np.ndarray:
+        # Coefficients for sum_{i < j} (x_i - x_j).
+        return np.arange(n - 1, -n, -2, dtype=float)
 
-    def _effective_rank(self, M: np.ndarray) -> float:
+    def _effective_rank_from_moments(self, moments: "_DisplacementMoments") -> float:
         """
-        Effective rank of a displacement matrix.
+        Effective rank of a centered displacement matrix from summary moments.
 
         Default method is entropy effective rank:
 
@@ -179,27 +189,21 @@ class Comness(COMMetric):
                 "stable"   -> (sum s_i)^2 / sum s_i^2
                 "threshold" -> number of singular values above threshold
 
-            center_displacements:
-                Whether to mean-center displacement vectors before SVD.
-                Default: True.
-
             singular_value_threshold:
                 Threshold for method="threshold".
                 Default: 1e-12.
         """
-        M = np.asarray(M, dtype=float)
-
-        if M.ndim != 2:
-            raise ValueError("Expected displacement matrix to be 2-dimensional.")
-
-        if M.shape[0] == 0:
+        if moments.count == 0:
             return 0.0
 
-        center = bool(self.kwargs.get("center_displacements", True))
-        if center:
-            M = M - np.mean(M, axis=0, keepdims=True)
+        # Centering is applied in Gram space without materializing M_c.
+        mean = moments.total / moments.count
+        covariance = moments.gram - moments.count * np.outer(mean, mean)
+        covariance = (covariance + covariance.T) / 2
 
-        singular_values = np.linalg.svd(M, full_matrices=False, compute_uv=False)
+        # Singular values of M_c are sqrt(eigenvalues(M_c.T @ M_c)).
+        eigenvalues = np.linalg.eigvalsh(covariance)
+        singular_values = np.sqrt(np.clip(eigenvalues, a_min=0.0, a_max=None))
         singular_values = singular_values[
             singular_values > np.finfo(float).eps
         ]
@@ -207,7 +211,7 @@ class Comness(COMMetric):
         if singular_values.size == 0:
             return 0.0
 
-        method = self.kwargs.get("effective_rank_method", "entropy")
+        method = self.kwargs.get("effective_rank_method", "stable")
 
         if method == "entropy":
             probs = singular_values / np.sum(singular_values)
@@ -227,3 +231,29 @@ class Comness(COMMetric):
             "Unknown effective_rank_method. Expected one of: "
             "'entropy', 'stable', or 'threshold'."
         )
+
+
+class _DisplacementMoments:
+    """
+    Stores enough statistics to compute effrank of pairwise differences.
+
+    For a group G = [x_0, ..., x_{n-1}], this accumulates the moments of all
+    rows (x_i - x_j), i < j, without building those rows.
+    """
+    def __init__(self, embedding_dim: int) -> None:
+        self.count = 0
+        self.total = np.zeros(embedding_dim, dtype=float)
+        self.gram = np.zeros((embedding_dim, embedding_dim), dtype=float)
+
+    def update_pairwise(self, group: np.ndarray, weights: np.ndarray) -> None:
+        n = group.shape[0]
+        if n < 2:
+            return
+
+        group_sum = np.sum(group, axis=0)
+        self.count += n * (n - 1) // 2
+        self.total += weights @ group
+
+        # sum_{i < j} (x_i - x_j)(x_i - x_j).T
+        #   = n * sum_i x_i x_i.T - (sum_i x_i)(sum_i x_i).T
+        self.gram += n * (group.T @ group) - np.outer(group_sum, group_sum)
