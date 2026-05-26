@@ -10,15 +10,15 @@ class LlamaEmbeddingModel(EmbeddingModel):
 
     def __init__(
         self,
-        model_name_or_path: str,
-        layer: int,
+        model_name_or_path: str = "meta-llama/Llama-3.1-8B-Instruct",
+        layer: int = -1,
         device: str | None = None,
         dtype: Any | None = None,
         **model_kwargs: Any,
     ):
         try:
             import torch
-            from transformers import AutoModelForCausalLM, AutoTokenizer
+            from transformers import AutoModel, AutoTokenizer
         except ImportError as exc:
             raise ImportError(
                 "Install `torch` and `transformers` to use LlamaEmbeddingModel."
@@ -34,10 +34,11 @@ class LlamaEmbeddingModel(EmbeddingModel):
         if dtype is not None:
             model_kwargs["torch_dtype"] = dtype
 
-        self.model = AutoModelForCausalLM.from_pretrained(
+        self.model = AutoModel.from_pretrained(
             model_name_or_path,
             **model_kwargs,
         ).to(self.device)
+        self.model.config.pad_token_id = self.tokenizer.pad_token_id
         self.model.eval()
 
     def encode(
@@ -79,7 +80,8 @@ class LlamaEmbeddingModel(EmbeddingModel):
             return (hidden * mask).sum(dim=1) / mask.sum(dim=1).clamp(min=1)
 
         if pooling == "last_token":
-            indices = attention_mask.sum(dim=1) - 1
+            positions = self.torch.arange(hidden.shape[1], device=hidden.device)
+            indices = positions.masked_fill(attention_mask == 0, -1).argmax(dim=1)
             batch_indices = self.torch.arange(hidden.shape[0], device=hidden.device)
             return hidden[batch_indices, indices]
 

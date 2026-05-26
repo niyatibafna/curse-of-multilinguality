@@ -16,7 +16,7 @@ class MistralEmbeddingModel(EmbeddingModel):
     ):
         try:
             import torch
-            from transformers import AutoModelForCausalLM, AutoTokenizer
+            from transformers import AutoModel, AutoTokenizer
         except ImportError as exc:
             raise ImportError("Install `torch` and `transformers` to use MistralEmbeddingModel.") from exc
 
@@ -30,7 +30,8 @@ class MistralEmbeddingModel(EmbeddingModel):
         if dtype is not None:
             model_kwargs["torch_dtype"] = dtype
 
-        self.model = AutoModelForCausalLM.from_pretrained(model_name_or_path, **model_kwargs).to(self.device)
+        self.model = AutoModel.from_pretrained(model_name_or_path, **model_kwargs).to(self.device)
+        self.model.config.pad_token_id = self.tokenizer.pad_token_id
         self.model.eval()
 
     def encode(
@@ -70,7 +71,8 @@ class MistralEmbeddingModel(EmbeddingModel):
             mask = attention_mask.unsqueeze(-1)
             return (hidden * mask).sum(dim=1) / mask.sum(dim=1).clamp(min=1)
         if pooling == "last_token":
-            indices = attention_mask.sum(dim=1) - 1
+            positions = self.torch.arange(hidden.shape[1], device=hidden.device)
+            indices = positions.masked_fill(attention_mask == 0, -1).argmax(dim=1)
             batch_indices = self.torch.arange(hidden.shape[0], device=hidden.device)
             return hidden[batch_indices, indices]
         raise ValueError(f"Unknown pooling strategy: {pooling}")
