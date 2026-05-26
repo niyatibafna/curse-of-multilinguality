@@ -1,4 +1,7 @@
 outputs/
+outputs_archive/
+misc/results_vis/results_plots/
 slurm_logs/
 slurm_scripts/
 *pycache*/
+AGENTS.md
