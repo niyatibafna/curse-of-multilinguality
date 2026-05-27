@@ -16,8 +16,8 @@ language variation instead of concept variation.
 
 - `anisotropy`: mean off-diagonal cosine similarity over all embeddings; high means vectors share a common direction.
 - `COMness`: `d_lang / (d_lang + d_concept)`, where `d_lang` is the effective rank of same-concept cross-language displacements and `d_concept` is the effective rank of same-language concept displacements.
-- Intuition: high COMness means language identity occupies many effective dimensions relative to semantic concept variation.
-- Efficiency: This would require a matrix of (combinatorial) pairwise difference vectors of which we then find singular values. This is too large to keep in memory; instead, the code accumulates centered Gram moments and gets singular values from eigenvalues of `M_c.T @ M_c`.
+  - Intuition: high COMness means language identity occupies many effective dimensions relative to semantic concept variation.
+  - Efficiency: This would require a matrix of (combinatorial) pairwise difference vectors of which we then find singular values. This is too large to keep in memory; instead, the code accumulates centered Gram moments and gets singular values from eigenvalues of `M_c.T @ M_c`.
 
 ## Models
 
