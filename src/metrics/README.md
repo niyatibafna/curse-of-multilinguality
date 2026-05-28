@@ -243,8 +243,8 @@ so
 
 $$M^\top M = \sum_g (M^{(g)})^\top M^{(g)}$$
 
-There are no cross-group terms here. Cross terms would appear in $MM^\top$, not
-in $M^\top M$. Since we only need $M^\top M$, each group can be processed
+There are no cross-group terms here. (Cross terms would appear in $MM^\top$, not
+in $M^\top M$. Both have the same non-zero eigenvalues but we'll use this for convenience.) Since we only need $M^\top M$, each group can be processed
 independently and added to a running total.
 
 For one group $G = [x_0, \ldots, x_{n-1}]$,
@@ -254,6 +254,9 @@ $$
 \sum_{i < j} (x_i - x_j)(x_i - x_j)^\top
 $$
 
+So don't need to store the entire matrix, we can just loop over all difference vectors and collect the Gram matrix. 
+
+But there's actually a closed form solution to find the contribution of each group.
 The key identity is:
 
 $$
