@@ -208,11 +208,11 @@ $$
 The key identity is:
 
 $$
+\begin{aligned}
 \sum_{i < j} (x_i - x_j)(x_i - x_j)^\top
-=
-n \sum_i x_i x_i^\top
--
-\bigl(\sum_i x_i\bigr)\bigl(\sum_i x_i\bigr)^\top
+&= n \sum_i x_i x_i^\top \\
+&\quad - \bigl(\sum_i x_i\bigr)\bigl(\sum_i x_i\bigr)^\top
+\end{aligned}
 $$
 
 After all groups are accumulated, centering happens in Gram space:
