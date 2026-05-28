@@ -180,29 +180,83 @@ a ratio.
 When `normalize=True`, each embedding vector is L2-normalized before computing
 the metric. This removes vector magnitude and keeps directional geometry.
 
-### Pairwise Displacement Trick
+### Making this efficient
 
 Many metrics need the effective dimension of a matrix of pairwise difference
-vectors:
+vectors. In the grouped case, each group contributes only its own within-group
+differences:
 
 $$
-M = \{x_i - x_j : i < j\}
+M^{(g)} = \{x_i^{(g)} - x_j^{(g)} : i < j\}
 $$
 
-Materializing `M` can be huge. Instead, we accumulate enough moments to recover
-the singular values of the centered displacement matrix. For each group
-$G = [x_0, \ldots, x_{n-1}]$, the code accumulates:
+The full displacement matrix is the row-wise stack of those group matrices:
 
 $$
-\mathrm{count} = {n \choose 2}
+M =
+\begin{bmatrix}
+M^{(1)} \\
+M^{(2)} \\
+\vdots \\
+M^{(G)}
+\end{bmatrix}
 $$
 
-$$
-\mathrm{total} = \sum_{i < j} (x_i - x_j)
-$$
+We want the singular values of the centered displacement matrix $M_c$, because
+those singular values are what define $d_{\mathrm{eff}}$. To get them, we use
+the fact that the eigenvalues of
 
 $$
-\mathrm{gram} = \sum_{i < j} (x_i - x_j)(x_i - x_j)^\top
+M_c^\top M_c
+$$
+
+are the squared singular values of $M_c$:
+
+$$
+s_i = \sqrt{\lambda_i(M_c^\top M_c)}
+$$
+
+So the goal is to construct $M_c^\top M_c$ directly. This is the useful Gram
+matrix because it is only `embedding_dim x embedding_dim`. The alternative,
+$M_c M_c^\top$, would be `num_displacements x num_displacements`, which is the
+large object we are trying to avoid.
+
+First ignore centering and construct $M^\top M$. Since $M$ is a vertical stack,
+
+$$
+\begin{aligned}
+M^\top M
+&=
+\begin{bmatrix}
+(M^{(1)})^\top & (M^{(2)})^\top & \cdots & (M^{(G)})^\top
+\end{bmatrix}
+\begin{bmatrix}
+M^{(1)} \\
+M^{(2)} \\
+\vdots \\
+M^{(G)}
+\end{bmatrix}
+\end{aligned}
+$$
+
+so
+
+$$
+M^\top M
+=
+\sum_g (M^{(g)})^\top M^{(g)}
+$$
+
+There are no cross-group terms here. Cross terms would appear in $MM^\top$, not
+in $M^\top M$. Since we only need $M^\top M$, each group can be processed
+independently and added to a running total.
+
+For one group $G = [x_0, \ldots, x_{n-1}]$,
+
+$$
+(M^{(g)})^\top M^{(g)}
+=
+\sum_{i < j} (x_i - x_j)(x_i - x_j)^\top
 $$
 
 The key identity is:
@@ -215,7 +269,27 @@ $$
 \end{aligned}
 $$
 
-After all groups are accumulated, centering happens in Gram space:
+This lets us add one group’s contribution to $M^\top M$ using only the group’s
+sum and second moment, without constructing the pairwise displacement rows.
+
+The code also accumulates the number and sum of all displacement rows:
+
+$$
+\mathrm{count} = \sum_g {n_g \choose 2}
+$$
+
+$$
+\mathrm{total} =
+\sum_g \sum_{i < j} (x_i^{(g)} - x_j^{(g)})
+$$
+
+These are needed to center the full stacked matrix. If
+
+$$
+\mu_M = \frac{\mathrm{total}}{\mathrm{count}},
+$$
+
+then centering in Gram space gives:
 
 $$
 M_c^\top M_c =
@@ -223,7 +297,7 @@ M^\top M -
 \mathrm{count} \cdot \mu_M \mu_M^\top
 $$
 
-Then:
+Finally, recover the singular values from the eigenvalues:
 
 $$
 s_i = \sqrt{\lambda_i(M_c^\top M_c)}
