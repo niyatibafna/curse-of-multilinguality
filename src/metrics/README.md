@@ -183,7 +183,8 @@ the metric. This removes vector magnitude and keeps directional geometry.
 ### Making this efficient
 
 Many metrics need the effective dimension of a matrix of pairwise difference
-vectors. In the grouped case, each group contributes only its own within-group
+vectors, computed between points belonging to a single group (e.g. a group could be all language variants of a single concept, or vice versa). The entire matrix would consist of vectors from all groups, and we now need to find the singular values for effective dimensionality of this large matrix.
+We note that each group contributes only its own within-group
 differences:
 
 $$
