@@ -241,11 +241,7 @@ $$
 
 so
 
-$$
-M^\top M
-=
-\sum_g (M^{(g)})^\top M^{(g)}
-$$
+$$M^\top M = \sum_g (M^{(g)})^\top M^{(g)}$$
 
 There are no cross-group terms here. Cross terms would appear in $MM^\top$, not
 in $M^\top M$. Since we only need $M^\top M$, each group can be processed
@@ -254,8 +250,7 @@ independently and added to a running total.
 For one group $G = [x_0, \ldots, x_{n-1}]$,
 
 $$
-(M^{(g)})^\top M^{(g)}
-=
+(M^{(g)})^\top M^{(g)} =
 \sum_{i < j} (x_i - x_j)(x_i - x_j)^\top
 $$
 
