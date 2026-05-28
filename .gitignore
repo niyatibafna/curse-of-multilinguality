@@ -5,3 +5,5 @@ slurm_logs/
 slurm_scripts/
 *pycache*/
 AGENTS.md
+misc/results_vis/concept_space_plots/*
+misc/results_vis/language_subspace_plots/*
