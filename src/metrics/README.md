@@ -51,16 +51,16 @@ where
 
 $$
 d_{\mathrm{lang}} =
-d_{\mathrm{eff}}\left(
-\left\{X[\ell_i, c] - X[\ell_j, c] : c,\ i < j\right\}
-\right)
+d_{\mathrm{eff}}\bigl(
+\{X[\ell_i, c] - X[\ell_j, c] : c,\ i < j\}
+\bigr)
 $$
 
 $$
 d_{\mathrm{concept}} =
-d_{\mathrm{eff}}\left(
-\left\{X[\ell, c_i] - X[\ell, c_j] : \ell,\ i < j\right\}
-\right)
+d_{\mathrm{eff}}\bigl(
+\{X[\ell, c_i] - X[\ell, c_j] : \ell,\ i < j\}
+\bigr)
 $$
 
 Low COMness means language identity occupies few effective dimensions relative
@@ -74,9 +74,9 @@ variation inside that language:
 
 $$
 d_\ell =
-d_{\mathrm{eff}}\left(
-\left\{X[\ell, c_i] - X[\ell, c_j] : i < j\right\}
-\right)
+d_{\mathrm{eff}}\bigl(
+\{X[\ell, c_i] - X[\ell, c_j] : i < j\}
+\bigr)
 $$
 
 The output contains a language -> dimension map and a descending sorted list for
@@ -91,9 +91,9 @@ $L_k$ compute:
 
 $$
 d(k) =
-d_{\mathrm{eff}}\left(
-\left\{X[\ell, c_i] - X[\ell, c_j] : \ell \in L_k,\ i < j\right\}
-\right)
+d_{\mathrm{eff}}\bigl(
+\{X[\ell, c_i] - X[\ell, c_j] : \ell \in L_k,\ i < j\}
+\bigr)
 $$
 
 The output records `(num_languages, effective_dim)` and the language order. The
@@ -108,12 +108,12 @@ differences:
 
 $$
 d(k) =
-d_{\mathrm{eff}}\left(
-\left\{
+d_{\mathrm{eff}}\bigl(
+\{
 X[\ell_i, c] - X[\ell_j, c] :
 c,\ \ell_i,\ell_j \in L_k,\ i < j
-\right\}
-\right)
+\}
+\bigr)
 $$
 
 The output records `(num_languages, effective_dim)` and the language order. This
@@ -127,12 +127,12 @@ prefixes $C_k$, compute:
 
 $$
 d(k) =
-d_{\mathrm{eff}}\left(
-\left\{
+d_{\mathrm{eff}}\bigl(
+\{
 X[\ell_i, c] - X[\ell_j, c] :
 c \in C_k,\ i < j
-\right\}
-\right)
+\}
+\bigr)
 $$
 
 The desired behavior is that the language subspace should use a mostly fixed
@@ -147,7 +147,7 @@ default method is the stable-rank style participation ratio:
 
 $$
 d_{\mathrm{eff}}(M) =
-\frac{\left(\sum_i s_i\right)^2}{\sum_i s_i^2}
+\frac{\bigl(\sum_i s_i\bigr)^2}{\sum_i s_i^2}
 $$
 
 This behaves like a soft dimension count. If all singular values are equal, it
@@ -160,7 +160,7 @@ Entropy effective rank:
 
 $$
 d_{\mathrm{entropy}}(M) =
-\exp\left(-\sum_i p_i \log p_i\right),
+\exp\bigl(-\sum_i p_i \log p_i\bigr),
 \qquad
 p_i = \frac{s_i}{\sum_j s_j}
 $$
@@ -169,7 +169,7 @@ Threshold rank:
 
 $$
 d_{\mathrm{threshold}}(M) =
-\left|\left\{i : s_i > \tau\right\}\right|
+|\{i : s_i > \tau\}|
 $$
 
 Dimensionality metrics usually report $d_{\mathrm{eff}} / D$ by default, so the
@@ -186,7 +186,7 @@ Many metrics need the effective dimension of a matrix of pairwise difference
 vectors:
 
 $$
-M = \left\{x_i - x_j : i < j\right\}
+M = \{x_i - x_j : i < j\}
 $$
 
 Materializing `M` can be huge. Instead, we accumulate enough moments to recover
@@ -212,7 +212,7 @@ $$
 =
 n \sum_i x_i x_i^\top
 -
-\left(\sum_i x_i\right)\left(\sum_i x_i\right)^\top
+\bigl(\sum_i x_i\bigr)\bigl(\sum_i x_i\bigr)^\top
 $$
 
 After all groups are accumulated, centering happens in Gram space:
