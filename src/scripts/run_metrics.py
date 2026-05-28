@@ -8,7 +8,6 @@ from pathlib import Path
 from datetime import datetime
 from typing import Any
 
-import fire
 import numpy as np
 from tqdm.auto import tqdm
 
@@ -16,13 +15,24 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.data import load_dataset
-from src.metrics import Anisotropy, Comness
+from src.metrics import (
+    Anisotropy,
+    Comness,
+    ConceptSpaceDimGrowthByLanguage,
+    IndividualLanguageConceptDimensionality,
+    LanguageSpaceDimGrowthByLanguage,
+    LanguageSpaceGrowthByConcepts,
+)
 from src.models import MODEL_REGISTRY, EmbeddingModel, load_model
 
 
 METRICS = {
     "anisotropy": Anisotropy,
     "comness": Comness,
+    "concept_space_dim_growth_by_language": ConceptSpaceDimGrowthByLanguage,
+    "individual_concept_dimensionality": IndividualLanguageConceptDimensionality,
+    "language_space_dim_growth_by_language": LanguageSpaceDimGrowthByLanguage,
+    "language_space_growth_by_concepts": LanguageSpaceGrowthByConcepts,
 }
 
 
@@ -58,7 +68,7 @@ def main(
 
     for dataset_name in datasets:
         log(f"loading dataset={dataset_name}")
-        texts, dataset_split = load_texts(dataset_name, dataset_languages, max_texts)
+        texts, dataset_split = load_texts(dataset_name, dataset_languages)
         languages = select_languages(texts, eval_languages)
         log(f"loaded {len(texts)} texts with {len(languages)} languages: {', '.join(languages)}")
 
@@ -75,7 +85,6 @@ def main(
                 split=dataset_split,
                 dataset_languages=dataset_languages,
                 eval_languages=languages,
-                max_texts=max_texts,
                 texts=texts,
                 layer=layer,
                 batch_size=batch_size,
@@ -111,10 +120,16 @@ def main(
                 log(f"loaded embedding cache {cache_path}")
 
             log(f"finished encoding model={model_name} dataset={dataset_name}")
+            metric_embeddings = slice_embeddings(embeddings, max_texts)
+            if max_texts is not None:
+                log(
+                    f"using first {len(next(iter(metric_embeddings.values())))} "
+                    f"of {len(next(iter(embeddings.values())))} cached concepts"
+                )
 
             for metric_name in metrics:
                 log(f"computing metric={metric_name} model={model_name} dataset={dataset_name}")
-                result = compute_metric(metric_name, embeddings, return_details, normalize)
+                result = compute_metric(metric_name, metric_embeddings, return_details, normalize)
                 output_path = output_file(output_dir, model_name, dataset_name, metric_name)
                 output_path.parent.mkdir(parents=True, exist_ok=True)
                 write_json(
@@ -127,8 +142,9 @@ def main(
                         "result": result,
                         "split": dataset_split,
                         "languages": len(languages),
-                        "num_concepts": len(next(iter(embeddings.values()))),
-                        "embedding_dim": int(next(iter(embeddings.values())).shape[-1]),
+                        "num_concepts": len(next(iter(metric_embeddings.values()))),
+                        "num_cached_concepts": len(next(iter(embeddings.values()))),
+                        "embedding_dim": int(next(iter(metric_embeddings.values())).shape[-1]),
                     },
                 )
                 log(f"wrote {output_path}")
@@ -137,7 +153,6 @@ def main(
 def load_texts(
     dataset_name: str,
     dataset_languages: list[str] | None,
-    max_texts: int | None,
 ) -> tuple[list[dict[str, Any]], str]:
     dataset = load_dataset(dataset_name, languages=dataset_languages)
     cache_path = formatted_cache_path(dataset_name, dataset.split, dataset_languages)
@@ -167,8 +182,6 @@ def load_texts(
     else:
         log(f"loaded dataset cache {cache_path}")
 
-    if max_texts is not None:
-        texts = texts[:max_texts]
     if not texts:
         raise ValueError(f"Dataset '{dataset_name}' returned no texts.")
     return texts, dataset.split
@@ -212,6 +225,18 @@ def embed_texts(
         embeddings[language] = as_numpy(encoded)
         log(f"encoded language {index}/{len(languages)}: {language} shape={embeddings[language].shape}")
     return embeddings
+
+
+def slice_embeddings(
+    embeddings: dict[str, np.ndarray],
+    max_texts: int | None,
+) -> dict[str, np.ndarray]:
+    if max_texts is None:
+        return embeddings
+    return {
+        language: language_embeddings[:max_texts]
+        for language, language_embeddings in embeddings.items()
+    }
 
 
 def compute_metric(
@@ -273,21 +298,19 @@ def embedding_cache_metadata(
     split: str,
     dataset_languages: list[str] | None,
     eval_languages: list[str],
-    max_texts: int | None,
     texts: list[dict[str, Any]],
     layer: int,
     batch_size: int,
     pooling: str,
 ) -> dict[str, Any]:
     return {
-        "cache_version": 1,
+        "cache_version": 2,
         "model": model_name,
         "model_type": model_type,
         "dataset": dataset_name,
         "split": split,
         "dataset_languages": dataset_languages,
         "eval_languages": eval_languages,
-        "requested_max_texts": max_texts,
         "num_texts": len(texts),
         "text_ids_hash": stable_hash([text["id"] for text in texts]),
         "text_data_hash": stable_hash([
@@ -416,4 +439,6 @@ def log(message: str) -> None:
 
 
 if __name__ == "__main__":
+    import fire
+
     fire.Fire(main)

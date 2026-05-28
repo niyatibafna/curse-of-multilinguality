@@ -58,3 +58,12 @@ class COMMetric:
 
     def compute(self):
         pass
+
+    def _effective_rank_kwargs(self) -> dict[str, Any]:
+        method = self.kwargs.get("effective_rank_method", "stable")
+        kwargs: dict[str, Any] = {"method": method}
+        if method == "threshold":
+            kwargs["singular_value_threshold"] = float(
+                self.kwargs.get("singular_value_threshold", 1e-12)
+            )
+        return kwargs
