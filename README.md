@@ -12,6 +12,24 @@ language variation instead of concept variation.
 - `tests/`: lightweight dataset/cache behavior tests.
 - `misc/results_vis/`: plotting helpers.
 
+## Directory Conventions
+
+- `outputs/`: the only active location for metric JSON. All metrics, including
+  COMness, write to `outputs/<model>/<dataset>/<metric>.json`.
+- `outputs_archive/`: timestamped snapshots of old `outputs/` trees before
+  reruns that would overwrite many results.
+- `misc/results_vis/plots/`: the only location for generated plot artifacts
+  (`.png`, `.pdf`, `.svg`, `.csv`). Plot scripts read from `outputs/` and write
+  under this directory.
+- `misc/results_vis/plots/preliminary_<name>/`: temporary or partial plots.
+- `slurm_logs/`: SLURM stdout/stderr logs only.
+- `$DATADIR/projects/curse-of-multilinguality/`: dataset and embedding caches
+  only, not metric JSON or plots.
+
+Do not create metric-specific output roots such as `outputs_comness/` or
+`outputs_scaling/`, and do not put generated plots directly under
+`misc/results_vis/` or the repo root.
+
 ## Metrics
 
 - `anisotropy`: mean off-diagonal cosine similarity over all embeddings; high means vectors share a common direction.

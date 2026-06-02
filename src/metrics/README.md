@@ -67,6 +67,38 @@ Low COMness means language identity occupies few effective dimensions relative
 to semantic concept variation. High COMness means language variation is
 geometrically complex relative to the concept space.
 
+With `return_details=True`, COMness also reports a random-baseline-normalized
+variant. The raw numerator and denominator use different group shapes:
+
+- language variation uses `num_concepts` groups of size `num_languages`
+- concept variation uses `num_languages` groups of size `num_concepts`
+
+The normalized variant samples random embeddings from the full pool with each
+same group shape, then compares each observed effective dimension to its matched
+random baseline:
+
+$$
+\tilde d_{\mathrm{lang}} =
+\frac{d_{\mathrm{lang}}}{d^{\mathrm{rand}}_{\mathrm{lang}}}
+$$
+
+$$
+\tilde d_{\mathrm{concept}} =
+\frac{d_{\mathrm{concept}}}{d^{\mathrm{rand}}_{\mathrm{concept}}}
+$$
+
+and reports:
+
+$$
+\mathrm{COM}_{\mathrm{normalized}}(X) =
+\frac{\tilde d_{\mathrm{lang}}}
+{\tilde d_{\mathrm{lang}} + \tilde d_{\mathrm{concept}}}
+$$
+
+This keeps the original COMness score available while adding a version that
+controls for effective-rank growth caused by different numbers of sampled
+points/displacements.
+
 ### `individual_concept_dimensionality`
 
 For each language independently, measure the effective dimension of concept
@@ -174,16 +206,16 @@ $$
 
 Dimensionality metrics usually report $d_{\mathrm{eff}} / D$ by default, so the
 number is a fraction of the model's embedding dimension. COMness uses
-unnormalized effective dimensions internally because its final score is already
-a ratio.
+unnormalized effective dimensions internally because its final scores are
+ratios.
 
 When `normalize=True`, each embedding vector is L2-normalized before computing
 the metric. This removes vector magnitude and keeps directional geometry.
 
 ### Random baseline normalization
 
-The scaling metrics also report a random baseline for each prefix. This is meant
-to separate real subspace growth from the generic effect of giving the
+The scaling metrics and COMness details also report random baselines. This is
+meant to separate real subspace growth from the generic effect of giving the
 effective-rank calculation more points.
 
 For each observed prefix, the metric samples random embeddings from the full
@@ -332,3 +364,4 @@ $$
 So we get the singular values needed for $d_{\mathrm{eff}}$ without storing the
 full `num_displacements x embedding_dim` matrix. Memory stays at roughly
 `embedding_dim x embedding_dim`.
+
