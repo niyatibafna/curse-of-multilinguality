@@ -5,7 +5,10 @@ from typing import Any
 import numpy as np
 
 from .metrics import COMMetric
-from .utils import pairwise_displacement_effective_rank
+from .utils import (
+    add_effective_dim_baseline,
+    pairwise_displacement_effective_rank,
+)
 
 
 class LanguageSpaceDimGrowthByLanguage(COMMetric):
@@ -18,16 +21,25 @@ class LanguageSpaceDimGrowthByLanguage(COMMetric):
 
         ordered_indices = self._language_order_indices()
         language_order = [list(self.X.keys())[index] for index in ordered_indices]
-        report = [
-            {
+        pool = X.reshape(-1, self.embedding_dim)
+        rng = self._random_baseline_rng()
+        report = []
+        for num_languages in self._language_counts():
+            effective_dim = self._effective_dim_for_prefix(
+                X,
+                ordered_indices[:num_languages],
+            )
+            row = {
                 "num_languages": num_languages,
-                "effective_dim": self._effective_dim_for_prefix(
-                    X,
-                    ordered_indices[:num_languages],
-                ),
+                "effective_dim": effective_dim,
             }
-            for num_languages in self._language_counts()
-        ]
+            baseline = self._random_baseline(
+                pool=pool,
+                group_sizes=[num_languages] * self.num_concepts,
+                rng=rng,
+                normalize_by_dim=self._normalize_effective_dim(),
+            )
+            report.append(add_effective_dim_baseline(row, effective_dim, baseline))
 
         result: dict[str, Any] = {
             "language_subspace_scaling": report,
@@ -41,6 +53,8 @@ class LanguageSpaceDimGrowthByLanguage(COMMetric):
                 "language_order_seed": int(self.kwargs.get("language_order_seed", 0)),
                 "effective_rank_method": self.kwargs.get("effective_rank_method", "stable"),
                 "normalize_effective_dim": self._normalize_effective_dim(),
+                "random_baseline_trials": self._random_baseline_trials(),
+                "random_baseline_seed": self._random_baseline_seed(),
                 "normalize": self.normalize,
             }
         return result
@@ -104,13 +118,22 @@ class LanguageSpaceGrowthByConcepts(COMMetric):
         if concept_step <= 0:
             raise ValueError("concept_step must be positive.")
 
-        report = [
-            {
+        pool = X.reshape(-1, self.embedding_dim)
+        rng = self._random_baseline_rng()
+        report = []
+        for num_concepts in self._concept_counts(concept_step):
+            effective_dim = self._effective_dim_for_concepts(X, num_concepts)
+            row = {
                 "num_concepts": num_concepts,
-                "effective_dim": self._effective_dim_for_concepts(X, num_concepts),
+                "effective_dim": effective_dim,
             }
-            for num_concepts in self._concept_counts(concept_step)
-        ]
+            baseline = self._random_baseline(
+                pool=pool,
+                group_sizes=[self.num_languages] * num_concepts,
+                rng=rng,
+                normalize_by_dim=self._normalize_effective_dim(),
+            )
+            report.append(add_effective_dim_baseline(row, effective_dim, baseline))
 
         result: dict[str, Any] = {
             "language_space_growth_by_concepts": report,
@@ -123,6 +146,8 @@ class LanguageSpaceGrowthByConcepts(COMMetric):
                 "concept_step": concept_step,
                 "effective_rank_method": self.kwargs.get("effective_rank_method", "stable"),
                 "normalize_effective_dim": self._normalize_effective_dim(),
+                "random_baseline_trials": self._random_baseline_trials(),
+                "random_baseline_seed": self._random_baseline_seed(),
                 "normalize": self.normalize,
             }
         return result

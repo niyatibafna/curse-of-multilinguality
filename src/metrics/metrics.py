@@ -4,6 +4,8 @@ from typing import Any
 
 import numpy as np
 
+from .utils import random_baseline_effective_rank
+
 
 class COMMetric:
     def __init__(
@@ -67,3 +69,32 @@ class COMMetric:
                 self.kwargs.get("singular_value_threshold", 1e-12)
             )
         return kwargs
+
+    def _random_baseline(
+        self,
+        pool: np.ndarray,
+        group_sizes: list[int],
+        rng: np.random.Generator,
+        normalize_by_dim: bool,
+    ) -> dict[str, Any]:
+        return random_baseline_effective_rank(
+            pool,
+            group_sizes,
+            embedding_dim=self.embedding_dim,
+            trials=self._random_baseline_trials(),
+            rng=rng,
+            normalize_by_dim=normalize_by_dim,
+            **self._effective_rank_kwargs(),
+        )
+
+    def _random_baseline_trials(self) -> int:
+        trials = int(self.kwargs.get("random_baseline_trials", 1))
+        if trials < 0:
+            raise ValueError("random_baseline_trials must be non-negative.")
+        return trials
+
+    def _random_baseline_seed(self) -> int:
+        return int(self.kwargs.get("random_baseline_seed", 0))
+
+    def _random_baseline_rng(self) -> np.random.Generator:
+        return np.random.default_rng(self._random_baseline_seed())

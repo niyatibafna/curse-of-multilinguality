@@ -5,6 +5,7 @@ import unittest
 import numpy as np
 
 from src.metrics.concept_space_dimensionality import (
+    ConceptSpaceDimGrowthByConcept,
     ConceptSpaceDimGrowthByLanguage,
     IndividualLanguageConceptDimensionality,
 )
@@ -16,6 +17,7 @@ from src.metrics.utils import (
     effective_rank,
     effective_rank_from_singular_values,
     pairwise_displacement_effective_rank,
+    random_groups_like,
 )
 
 
@@ -105,6 +107,14 @@ class EffectiveRankTest(unittest.TestCase):
             normalize_by_dim=True,
         )
         self.assertAlmostEqual(normalized, absolute / 3)
+
+    def test_random_groups_like_preserves_group_sizes(self):
+        pool = np.arange(30, dtype=float).reshape(10, 3)
+        rng = np.random.default_rng(0)
+
+        groups = random_groups_like(pool, [2, 3, 5], rng)
+
+        self.assertEqual([group.shape for group in groups], [(2, 3), (3, 3), (5, 3)])
 
 
 class ConceptDimensionalityMetricsTest(unittest.TestCase):
@@ -199,6 +209,85 @@ class ConceptDimensionalityMetricsTest(unittest.TestCase):
             effective_rank(explicit, center=True),
         )
 
+    def test_concept_space_dim_growth_by_language_reports_random_baseline(self):
+        result = ConceptSpaceDimGrowthByLanguage(
+            self.embeddings,
+            num_concepts=3,
+            num_languages=2,
+            embedding_dim=2,
+            normalize=False,
+            random_baseline_trials=2,
+            random_baseline_seed=123,
+        ).compute()
+
+        row = result["concept_space_dim_growth_by_language"][0]
+        self.assertIn("random_effective_dim_mean", row)
+        self.assertIn("random_effective_dim_std", row)
+        self.assertEqual(row["random_baseline_trials"], 2)
+        self.assertIn("effective_dim_ratio", row)
+
+    def test_concept_space_dim_growth_by_concept_uses_concept_steps(self):
+        result = ConceptSpaceDimGrowthByConcept(
+            self.embeddings,
+            num_concepts=3,
+            num_languages=2,
+            embedding_dim=2,
+            normalize=False,
+            concept_step=2,
+            normalize_effective_dim=False,
+        ).compute()
+
+        self.assertEqual(
+            [row["num_concepts"] for row in result["concept_space_dim_growth_by_concept"]],
+            [2, 3],
+        )
+
+    def test_concept_space_dim_growth_by_concept_matches_explicit_displacements(self):
+        result = ConceptSpaceDimGrowthByConcept(
+            self.embeddings,
+            num_concepts=3,
+            num_languages=2,
+            embedding_dim=2,
+            normalize=False,
+            concept_step=3,
+            normalize_effective_dim=False,
+        ).compute()
+        explicit = np.vstack([
+            embeddings[i] - embeddings[j]
+            for embeddings in self.embeddings.values()
+            for i in range(3)
+            for j in range(i + 1, 3)
+        ])
+
+        self.assertAlmostEqual(
+            result["concept_space_dim_growth_by_concept"][0]["effective_dim"],
+            effective_rank(explicit, center=True),
+        )
+
+    def test_concept_space_dim_growth_by_concept_normalizes_by_default(self):
+        normalized = ConceptSpaceDimGrowthByConcept(
+            self.embeddings,
+            num_concepts=3,
+            num_languages=2,
+            embedding_dim=2,
+            normalize=False,
+            concept_step=3,
+        ).compute()
+        absolute = ConceptSpaceDimGrowthByConcept(
+            self.embeddings,
+            num_concepts=3,
+            num_languages=2,
+            embedding_dim=2,
+            normalize=False,
+            concept_step=3,
+            normalize_effective_dim=False,
+        ).compute()
+
+        self.assertAlmostEqual(
+            normalized["concept_space_dim_growth_by_concept"][0]["effective_dim"],
+            absolute["concept_space_dim_growth_by_concept"][0]["effective_dim"] / 2,
+        )
+
 
 class LanguageSubspaceDimensionalityMetricsTest(unittest.TestCase):
     def setUp(self):
@@ -252,6 +341,23 @@ class LanguageSubspaceDimensionalityMetricsTest(unittest.TestCase):
             result["language_subspace_scaling"][0]["effective_dim"],
             effective_rank(explicit, center=True),
         )
+
+    def test_language_scaling_reports_random_baseline(self):
+        result = LanguageSpaceDimGrowthByLanguage(
+            self.embeddings,
+            num_concepts=3,
+            num_languages=6,
+            embedding_dim=3,
+            normalize=False,
+            random_baseline_trials=2,
+            random_baseline_seed=123,
+        ).compute()
+
+        row = result["language_subspace_scaling"][0]
+        self.assertIn("random_effective_dim_mean", row)
+        self.assertIn("random_effective_dim_std", row)
+        self.assertEqual(row["random_baseline_trials"], 2)
+        self.assertIn("effective_dim_ratio", row)
 
     def test_language_scaling_normalizes_effective_dim_by_default(self):
         normalized = LanguageSpaceDimGrowthByLanguage(

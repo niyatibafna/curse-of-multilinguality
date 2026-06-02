@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Iterable, Literal
+from typing import Any, Iterable, Literal
 
 import numpy as np
 
@@ -90,6 +90,85 @@ def pairwise_displacement_effective_rank(
         singular_value_threshold=singular_value_threshold,
         normalize_by_dim=normalize_by_dim,
     )
+
+
+def random_baseline_effective_rank(
+    pool: np.ndarray,
+    group_sizes: Iterable[int],
+    embedding_dim: int,
+    trials: int,
+    rng: np.random.Generator,
+    method: EffectiveRankMethod | str = "stable",
+    singular_value_threshold: float = 1e-12,
+    normalize_by_dim: bool = False,
+) -> dict[str, Any]:
+    group_sizes = list(group_sizes)
+    if trials <= 0:
+        return {}
+
+    ranks = [
+        pairwise_displacement_effective_rank(
+            random_groups_like(pool, group_sizes, rng),
+            embedding_dim=embedding_dim,
+            method=method,
+            singular_value_threshold=singular_value_threshold,
+            normalize_by_dim=normalize_by_dim,
+        )
+        for _ in range(trials)
+    ]
+
+    return {
+        "random_effective_dim_mean": float(np.mean(ranks)),
+        "random_effective_dim_std": float(np.std(ranks)),
+        "random_baseline_trials": trials,
+    }
+
+
+def random_groups_like(
+    pool: np.ndarray,
+    group_sizes: Iterable[int],
+    rng: np.random.Generator,
+) -> list[np.ndarray]:
+    pool = np.asarray(pool, dtype=float)
+    if pool.ndim != 2:
+        raise ValueError("Expected pool to have shape (num_points, embedding_dim).")
+    if not np.all(np.isfinite(pool)):
+        raise ValueError("Pool contains NaN or infinite values.")
+
+    group_sizes = list(group_sizes)
+    if any(size < 0 for size in group_sizes):
+        raise ValueError("Group sizes must be non-negative.")
+
+    total = sum(group_sizes)
+    replace = total > pool.shape[0]
+    indices = rng.choice(pool.shape[0], size=total, replace=replace)
+
+    groups = []
+    start = 0
+    for size in group_sizes:
+        groups.append(pool[indices[start:start + size]])
+        start += size
+    return groups
+
+
+def add_effective_dim_baseline(
+    row: dict[str, Any],
+    observed_effective_dim: float,
+    baseline: dict[str, Any],
+) -> dict[str, Any]:
+    if not baseline:
+        return row
+
+    random_mean = baseline["random_effective_dim_mean"]
+    ratio = None
+    if random_mean > np.finfo(float).eps:
+        ratio = observed_effective_dim / random_mean
+
+    return {
+        **row,
+        **baseline,
+        "effective_dim_ratio": ratio,
+    }
 
 
 def effective_rank_from_moments(

@@ -18,6 +18,7 @@ from src.data import load_dataset
 from src.metrics import (
     Anisotropy,
     Comness,
+    ConceptSpaceDimGrowthByConcept,
     ConceptSpaceDimGrowthByLanguage,
     IndividualLanguageConceptDimensionality,
     LanguageSpaceDimGrowthByLanguage,
@@ -29,6 +30,7 @@ from src.models import MODEL_REGISTRY, EmbeddingModel, load_model
 METRICS = {
     "anisotropy": Anisotropy,
     "comness": Comness,
+    "concept_space_dim_growth_by_concept": ConceptSpaceDimGrowthByConcept,
     "concept_space_dim_growth_by_language": ConceptSpaceDimGrowthByLanguage,
     "individual_concept_dimensionality": IndividualLanguageConceptDimensionality,
     "language_space_dim_growth_by_language": LanguageSpaceDimGrowthByLanguage,
@@ -51,6 +53,8 @@ def main(
     device: str | None = None,
     return_details: bool = False,
     normalize: bool = True,
+    random_baseline_trials: int = 1,
+    random_baseline_seed: int = 0,
 ) -> None:
     models = as_list(models)
     datasets = as_list(datasets)
@@ -129,7 +133,14 @@ def main(
 
             for metric_name in metrics:
                 log(f"computing metric={metric_name} model={model_name} dataset={dataset_name}")
-                result = compute_metric(metric_name, metric_embeddings, return_details, normalize)
+                result = compute_metric(
+                    metric_name,
+                    metric_embeddings,
+                    return_details,
+                    normalize,
+                    random_baseline_trials=random_baseline_trials,
+                    random_baseline_seed=random_baseline_seed,
+                )
                 output_path = output_file(output_dir, model_name, dataset_name, metric_name)
                 output_path.parent.mkdir(parents=True, exist_ok=True)
                 write_json(
@@ -244,6 +255,7 @@ def compute_metric(
     embeddings: dict[str, np.ndarray],
     return_details: bool,
     normalize: bool,
+    **metric_kwargs: Any,
 ) -> Any:
     first = next(iter(embeddings.values()))
     metric = METRICS[metric_name](
@@ -253,6 +265,7 @@ def compute_metric(
         embedding_dim=first.shape[-1],
         return_details=return_details,
         normalize=normalize,
+        **metric_kwargs,
     )
     return to_jsonable(metric.compute())
 

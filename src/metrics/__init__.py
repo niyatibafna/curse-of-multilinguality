@@ -1,5 +1,6 @@
 from .anisotropy import Anisotropy
 from .concept_space_dimensionality import (
+    ConceptSpaceDimGrowthByConcept,
     ConceptSpaceDimGrowthByLanguage,
     IndividualLanguageConceptDimensionality,
 )
@@ -14,6 +15,7 @@ __all__ = [
     "Anisotropy",
     "COMMetric",
     "Comness",
+    "ConceptSpaceDimGrowthByConcept",
     "ConceptSpaceDimGrowthByLanguage",
     "IndividualLanguageConceptDimensionality",
     "LanguageSpaceDimGrowthByLanguage",

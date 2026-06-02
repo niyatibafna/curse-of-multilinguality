@@ -92,6 +92,9 @@ Useful args:
 - `--device`: e.g. `cuda`, `cuda:0`, `cpu`.
 - `--return_details True`: include diagnostic fields in metric JSON.
 - `--normalize False`: disable L2 normalization before metrics.
+- `--random_baseline_trials`: random baseline samples for scaling metrics; set
+  `0` to disable. Default `1`.
+- `--random_baseline_seed`: seed for scaling-metric random baselines.
 
 Env variables:
 

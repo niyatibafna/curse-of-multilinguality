@@ -180,6 +180,33 @@ a ratio.
 When `normalize=True`, each embedding vector is L2-normalized before computing
 the metric. This removes vector magnitude and keeps directional geometry.
 
+### Random baseline normalization
+
+The scaling metrics also report a random baseline for each prefix. This is meant
+to separate real subspace growth from the generic effect of giving the
+effective-rank calculation more points.
+
+For each observed prefix, the metric samples random embeddings from the full
+language/concept pool and arranges them into groups with the same sizes as the
+observed groups. It then computes effective dimensionality with the exact same
+pairwise-displacement calculation.
+
+For example, if `language_space_dim_growth_by_language` is evaluating a prefix
+of 5 languages over 500 concepts, the observed calculation uses 500 groups of
+size 5, one group per concept. The random baseline uses the same grouping shape:
+500 random groups of size 5.
+
+Scaling rows keep the original `effective_dim` field and add:
+
+- `random_effective_dim_mean`
+- `random_effective_dim_std`
+- `random_baseline_trials`
+- `effective_dim_ratio = effective_dim / random_effective_dim_mean`
+
+Use `random_baseline_trials` to control the number of random samples. Set it to
+0 to disable the baseline fields. Use `random_baseline_seed` for reproducible
+sampling.
+
 ### Making this efficient
 
 Many metrics need the effective dimension of a matrix of pairwise difference

@@ -5,7 +5,10 @@ from typing import Any
 import numpy as np
 
 from .metrics import COMMetric
-from .utils import pairwise_displacement_effective_rank
+from .utils import (
+    add_effective_dim_baseline,
+    pairwise_displacement_effective_rank,
+)
 
 
 class IndividualLanguageConceptDimensionality(COMMetric):
@@ -71,15 +74,25 @@ class ConceptSpaceDimGrowthByLanguage(COMMetric):
 
     def compute(self) -> dict[str, Any]:
         ordered_languages = self._language_order()
-        report = [
-            {
+        pool = self._embedding_pool()
+        rng = self._random_baseline_rng()
+
+        report = []
+        for num_languages in self._language_counts():
+            effective_dim = self._effective_dim_for_languages(
+                ordered_languages[:num_languages]
+            )
+            row = {
                 "num_languages": num_languages,
-                "effective_dim": self._effective_dim_for_languages(
-                    ordered_languages[:num_languages]
-                ),
+                "effective_dim": effective_dim,
             }
-            for num_languages in self._language_counts()
-        ]
+            baseline = self._random_baseline(
+                pool=pool,
+                group_sizes=[self.num_concepts] * num_languages,
+                rng=rng,
+                normalize_by_dim=self._normalize_effective_dim(),
+            )
+            report.append(add_effective_dim_baseline(row, effective_dim, baseline))
 
         result: dict[str, Any] = {
             "concept_space_dim_growth_by_language": report,
@@ -93,6 +106,8 @@ class ConceptSpaceDimGrowthByLanguage(COMMetric):
                 "language_order_seed": int(self.kwargs.get("language_order_seed", 0)),
                 "effective_rank_method": self.kwargs.get("effective_rank_method", "stable"),
                 "normalize_effective_dim": self._normalize_effective_dim(),
+                "random_baseline_trials": self._random_baseline_trials(),
+                "random_baseline_seed": self._random_baseline_seed(),
                 "normalize": self.normalize,
             }
         return result
@@ -139,3 +154,96 @@ class ConceptSpaceDimGrowthByLanguage(COMMetric):
 
     def _normalize_effective_dim(self) -> bool:
         return bool(self.kwargs.get("normalize_effective_dim", True))
+
+    def _embedding_pool(self) -> np.ndarray:
+        pool = []
+        for language_embeddings in self.X.values():
+            embeddings = np.asarray(language_embeddings, dtype=float)
+            if self.normalize:
+                embeddings = _normalize_rows(embeddings)
+            pool.append(embeddings)
+        return np.vstack(pool)
+
+
+class ConceptSpaceDimGrowthByConcept(COMMetric):
+    """Concept-displacement dimensionality as concepts are added."""
+
+    def compute(self) -> dict[str, Any]:
+        concept_step = int(self.kwargs.get("concept_step", 25))
+        if concept_step <= 0:
+            raise ValueError("concept_step must be positive.")
+
+        pool = self._embedding_pool()
+        rng = self._random_baseline_rng()
+        report = []
+        for num_concepts in self._concept_counts(concept_step):
+            effective_dim = self._effective_dim_for_concepts(num_concepts)
+            row = {
+                "num_concepts": num_concepts,
+                "effective_dim": effective_dim,
+            }
+            baseline = self._random_baseline(
+                pool=pool,
+                group_sizes=[num_concepts] * self.num_languages,
+                rng=rng,
+                normalize_by_dim=self._normalize_effective_dim(),
+            )
+            report.append(add_effective_dim_baseline(row, effective_dim, baseline))
+
+        result: dict[str, Any] = {
+            "concept_space_dim_growth_by_concept": report,
+        }
+        if self.return_details:
+            result["details"] = {
+                "num_languages": self.num_languages,
+                "num_concepts": self.num_concepts,
+                "embedding_dim": self.embedding_dim,
+                "concept_step": concept_step,
+                "effective_rank_method": self.kwargs.get("effective_rank_method", "stable"),
+                "normalize_effective_dim": self._normalize_effective_dim(),
+                "random_baseline_trials": self._random_baseline_trials(),
+                "random_baseline_seed": self._random_baseline_seed(),
+                "normalize": self.normalize,
+            }
+        return result
+
+    def _concept_counts(self, concept_step: int) -> list[int]:
+        counts = list(range(concept_step, self.num_concepts + 1, concept_step))
+        if not counts or counts[-1] != self.num_concepts:
+            counts.append(self.num_concepts)
+        return counts
+
+    def _effective_dim_for_concepts(self, num_concepts: int) -> float:
+        groups = []
+        for language, language_embeddings in self.X.items():
+            embeddings = np.asarray(language_embeddings[:num_concepts], dtype=float)
+            expected_shape = (num_concepts, self.embedding_dim)
+            if embeddings.shape != expected_shape:
+                raise ValueError(
+                    f"Expected X[{language!r}][:{num_concepts}] to have shape "
+                    f"{expected_shape}, got {embeddings.shape}."
+                )
+            if not np.all(np.isfinite(embeddings)):
+                raise ValueError(f"X[{language!r}] contains NaN or infinite values.")
+            if self.normalize:
+                embeddings = _normalize_rows(embeddings)
+            groups.append(embeddings)
+
+        return pairwise_displacement_effective_rank(
+            groups,
+            embedding_dim=self.embedding_dim,
+            normalize_by_dim=self._normalize_effective_dim(),
+            **self._effective_rank_kwargs(),
+        )
+
+    def _normalize_effective_dim(self) -> bool:
+        return bool(self.kwargs.get("normalize_effective_dim", True))
+
+    def _embedding_pool(self) -> np.ndarray:
+        pool = []
+        for language_embeddings in self.X.values():
+            embeddings = np.asarray(language_embeddings, dtype=float)
+            if self.normalize:
+                embeddings = _normalize_rows(embeddings)
+            pool.append(embeddings)
+        return np.vstack(pool)
