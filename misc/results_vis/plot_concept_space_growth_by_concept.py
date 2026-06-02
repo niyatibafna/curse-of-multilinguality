@@ -15,33 +15,30 @@ import matplotlib.pyplot as plt
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_INPUT_DIR = PROJECT_ROOT / "outputs"
 DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parent / "plots"
-METRIC = "language_space_dim_growth_by_language"
+METRIC = "concept_space_dim_growth_by_concept"
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Plot language-subspace dimensionality scaling.")
+    parser = argparse.ArgumentParser(description="Plot concept-space dimensionality by concepts.")
     parser.add_argument("--input-dir", type=Path, default=DEFAULT_INPUT_DIR)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--formats", nargs="+", default=["png"], choices=["png", "pdf", "svg"])
     args = parser.parse_args()
 
-    scaling_rows, order_rows = load_results(args.input_dir)
-    if not scaling_rows:
+    rows = load_results(args.input_dir)
+    if not rows:
         raise ValueError(f"No {METRIC} results found in {args.input_dir}")
 
-    args.output_dir.mkdir(parents=True, exist_ok=True)
     output_dir = metric_dir(args.output_dir, METRIC)
-    write_csv(scaling_rows, output_dir / "language_subspace_scaling.csv")
-    write_csv(order_rows, output_dir / "language_orders.csv")
-    plot_by_dataset(scaling_rows, args.output_dir, args.formats)
-    plot_dataset_grid(scaling_rows, args.output_dir, args.formats)
-    plot_by_model(scaling_rows, args.output_dir, args.formats)
-    print(f"Wrote language-subspace plots to {args.output_dir}")
+    write_csv(rows, output_dir / "concept_space_dim_growth_by_concept.csv")
+    plot_by_dataset(rows, args.output_dir, args.formats)
+    plot_dataset_grid(rows, args.output_dir, args.formats)
+    plot_by_model(rows, args.output_dir, args.formats)
+    print(f"Wrote concept-growth-by-concept plots to {args.output_dir}")
 
 
-def load_results(input_dir: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    scaling_rows = []
-    order_rows = []
+def load_results(input_dir: Path) -> list[dict[str, Any]]:
+    rows = []
     for path in sorted(input_dir.glob("*/*/*.json")):
         with path.open() as handle:
             payload = json.load(handle)
@@ -56,43 +53,35 @@ def load_results(input_dir: Path) -> tuple[list[dict[str, Any]], list[dict[str, 
         if not isinstance(result, dict):
             continue
 
-        for row in result.get("language_subspace_scaling", []):
-            scaling_rows.append({
+        for row in result.get("concept_space_dim_growth_by_concept", []):
+            rows.append({
                 "model": model,
                 "dataset": dataset,
-                "num_languages": int(row["num_languages"]),
+                "num_concepts": int(row["num_concepts"]),
                 "effective_dim": float(row["effective_dim"]),
             })
-        for index, language in enumerate(result.get("language_order", [])):
-            order_rows.append({
-                "model": model,
-                "dataset": dataset,
-                "order_index": index,
-                "language": language,
-            })
-
-    return scaling_rows, order_rows
+    return rows
 
 
 def plot_by_dataset(rows: list[dict[str, Any]], output_dir: Path, formats: list[str]) -> None:
     for dataset, subset in sorted(group_by(rows, "dataset").items()):
         fig, ax = plt.subplots(figsize=(8, 5))
         for model, model_rows in sorted(group_by(subset, "model").items()):
-            model_rows = sorted(model_rows, key=lambda row: row["num_languages"])
+            model_rows = sorted(model_rows, key=lambda row: row["num_concepts"])
             ax.plot(
-                [row["num_languages"] for row in model_rows],
+                [row["num_concepts"] for row in model_rows],
                 [row["effective_dim"] for row in model_rows],
                 marker="o",
                 linewidth=1.5,
                 markersize=3,
                 label=model,
             )
-        ax.set_title(f"Language-subspace dimensionality on {pretty(dataset)}")
-        ax.set_xlabel("Number of languages")
+        ax.set_title(f"Concept-space dimensionality by concepts on {pretty(dataset)}")
+        ax.set_xlabel("Number of concepts")
         ax.set_ylabel("Effective dimensionality")
         ax.legend(fontsize=8)
         fig.tight_layout()
-        save_figure(fig, metric_dir(output_dir, METRIC) / f"{dataset}__language_subspace_scaling", formats)
+        save_figure(fig, metric_dir(output_dir, METRIC) / f"{dataset}__concept_space_dim_growth_by_concept", formats)
 
 
 def plot_dataset_grid(rows: list[dict[str, Any]], output_dir: Path, formats: list[str]) -> None:
@@ -101,9 +90,9 @@ def plot_dataset_grid(rows: list[dict[str, Any]], output_dir: Path, formats: lis
     for ax, dataset in zip(axes[0], datasets):
         subset = [row for row in rows if row["dataset"] == dataset]
         for model, model_rows in sorted(group_by(subset, "model").items()):
-            model_rows = sorted(model_rows, key=lambda row: row["num_languages"])
+            model_rows = sorted(model_rows, key=lambda row: row["num_concepts"])
             ax.plot(
-                [row["num_languages"] for row in model_rows],
+                [row["num_concepts"] for row in model_rows],
                 [row["effective_dim"] for row in model_rows],
                 marker="o",
                 linewidth=1.5,
@@ -111,35 +100,35 @@ def plot_dataset_grid(rows: list[dict[str, Any]], output_dir: Path, formats: lis
                 label=model,
             )
         ax.set_title(pretty(dataset))
-        ax.set_xlabel("Number of languages")
+        ax.set_xlabel("Number of concepts")
         ax.set_ylabel("Effective dimensionality")
     axes[0][-1].legend(fontsize=8, bbox_to_anchor=(1.04, 1), loc="upper left")
-    fig.suptitle("Language-space dimensionality by languages")
+    fig.suptitle("Concept-space dimensionality by concepts")
     fig.tight_layout()
-    save_figure(fig, metric_dir(output_dir, METRIC) / "all_datasets__language_subspace_scaling", formats)
+    save_figure(fig, metric_dir(output_dir, METRIC) / "all_datasets__concept_space_dim_growth_by_concept", formats)
 
 
 def plot_by_model(rows: list[dict[str, Any]], output_dir: Path, formats: list[str]) -> None:
     for model, subset in sorted(group_by(rows, "model").items()):
         fig, ax = plt.subplots(figsize=(8, 5))
         for dataset, dataset_rows in sorted(group_by(subset, "dataset").items()):
-            dataset_rows = sorted(dataset_rows, key=lambda row: row["num_languages"])
+            dataset_rows = sorted(dataset_rows, key=lambda row: row["num_concepts"])
             ax.plot(
-                [row["num_languages"] for row in dataset_rows],
+                [row["num_concepts"] for row in dataset_rows],
                 [row["effective_dim"] for row in dataset_rows],
                 marker="o",
                 linewidth=1.5,
                 markersize=3,
                 label=dataset,
             )
-        ax.set_title(f"Language-subspace dimensionality for {model}")
-        ax.set_xlabel("Number of languages")
+        ax.set_title(f"Concept-space dimensionality by concepts for {model}")
+        ax.set_xlabel("Number of concepts")
         ax.set_ylabel("Effective dimensionality")
         ax.legend(fontsize=8)
         fig.tight_layout()
         save_figure(
             fig,
-            metric_dir(output_dir, METRIC) / "detailed_plots" / f"{slugify(model)}__language_subspace_scaling",
+            metric_dir(output_dir, METRIC) / "detailed_plots" / f"{slugify(model)}__concept_space_dim_growth_by_concept",
             formats,
         )
 

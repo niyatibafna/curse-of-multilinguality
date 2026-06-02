@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_INPUT_DIR = PROJECT_ROOT / "outputs"
-DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parent / "concept_space_plots"
+DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parent / "plots"
 INDIVIDUAL_METRIC = "individual_concept_dimensionality"
 LANGUAGE_GROWTH_METRIC = "concept_space_dim_growth_by_language"
 
@@ -32,13 +32,18 @@ def main() -> None:
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     if individual_rows:
-        write_csv(individual_rows, args.output_dir / "individual_language_dims.csv")
+        individual_dir = metric_dir(args.output_dir, INDIVIDUAL_METRIC)
+        write_csv(individual_rows, individual_dir / "individual_language_dims.csv")
         plot_individual_language_dims(individual_rows, args.output_dir, args.formats)
         plot_language_dim_summary(individual_rows, args.output_dir, args.formats)
+        plot_language_dim_summary_grid(individual_rows, args.output_dir, args.formats)
     if growth_rows:
-        write_csv(growth_rows, args.output_dir / "concept_dim_growth_by_language.csv")
-        write_csv(order_rows, args.output_dir / "concept_dim_growth_language_orders.csv")
+        growth_dir = metric_dir(args.output_dir, LANGUAGE_GROWTH_METRIC)
+        write_csv(growth_rows, growth_dir / "concept_dim_growth_by_language.csv")
+        write_csv(order_rows, growth_dir / "concept_dim_growth_language_orders.csv")
         plot_growth_by_language(growth_rows, args.output_dir, args.formats)
+        plot_growth_by_language_grid(growth_rows, args.output_dir, args.formats)
+        plot_growth_by_model(growth_rows, args.output_dir, args.formats)
 
     print(f"Wrote concept-space plots to {args.output_dir}")
 
@@ -103,7 +108,9 @@ def plot_individual_language_dims(rows: list[dict[str, Any]], output_dir: Path, 
         fig.tight_layout()
         save_figure(
             fig,
-            output_dir / f"{dataset}__{slugify(model)}__individual_language_dims",
+            metric_dir(output_dir, INDIVIDUAL_METRIC)
+            / "detailed_plots"
+            / f"{dataset}__{slugify(model)}__individual_language_dims",
             formats,
         )
 
@@ -136,7 +143,52 @@ def plot_language_dim_summary(rows: list[dict[str, Any]], output_dir: Path, form
         for tick in ax.get_xticklabels():
             tick.set_horizontalalignment("right")
         fig.tight_layout()
-        save_figure(fig, output_dir / f"{dataset}__individual_language_dim_summary", formats)
+        save_figure(
+            fig,
+            metric_dir(output_dir, INDIVIDUAL_METRIC) / f"{dataset}__individual_language_dim_summary",
+            formats,
+        )
+
+
+def plot_language_dim_summary_grid(rows: list[dict[str, Any]], output_dir: Path, formats: list[str]) -> None:
+    summary = language_dim_summary(rows)
+    datasets = sorted({row["dataset"] for row in summary})
+    fig, axes = plt.subplots(1, len(datasets), figsize=(max(5 * len(datasets), 8), 4.5), squeeze=False)
+    for ax, dataset in zip(axes[0], datasets):
+        subset = sorted([row for row in summary if row["dataset"] == dataset], key=lambda row: row["mean"], reverse=True)
+        labels = [row["model"] for row in subset]
+        means = [row["mean"] for row in subset]
+        lower = [row["mean"] - row["min"] for row in subset]
+        upper = [row["max"] - row["mean"] for row in subset]
+        ax.bar(labels, means, color="#59A14F")
+        ax.errorbar(labels, means, yerr=[lower, upper], fmt="none", color="#222222", capsize=3)
+        ax.set_title(pretty(dataset))
+        ax.set_xlabel("Model")
+        ax.set_ylabel("Mean effective dimensionality")
+        ax.tick_params(axis="x", labelrotation=45)
+        for tick in ax.get_xticklabels():
+            tick.set_horizontalalignment("right")
+    fig.suptitle("Per-language dimensionality")
+    fig.tight_layout()
+    save_figure(
+        fig,
+        metric_dir(output_dir, INDIVIDUAL_METRIC) / "all_datasets__individual_language_dim_summary",
+        formats,
+    )
+
+
+def language_dim_summary(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    summary = []
+    for (dataset, model), subset in sorted(group_by(rows, "dataset", "model").items()):
+        values = [row["effective_dim"] for row in subset]
+        summary.append({
+            "dataset": dataset,
+            "model": model,
+            "mean": sum(values) / len(values),
+            "min": min(values),
+            "max": max(values),
+        })
+    return summary
 
 
 def plot_growth_by_language(rows: list[dict[str, Any]], output_dir: Path, formats: list[str]) -> None:
@@ -157,12 +209,72 @@ def plot_growth_by_language(rows: list[dict[str, Any]], output_dir: Path, format
         ax.set_ylabel("Effective dimensionality")
         ax.legend(fontsize=8)
         fig.tight_layout()
-        save_figure(fig, output_dir / f"{dataset}__concept_dim_growth_by_language", formats)
+        save_figure(
+            fig,
+            metric_dir(output_dir, LANGUAGE_GROWTH_METRIC) / f"{dataset}__concept_dim_growth_by_language",
+            formats,
+        )
+
+
+def plot_growth_by_language_grid(rows: list[dict[str, Any]], output_dir: Path, formats: list[str]) -> None:
+    datasets = sorted({row["dataset"] for row in rows})
+    fig, axes = plt.subplots(1, len(datasets), figsize=(max(5 * len(datasets), 8), 4.5), squeeze=False)
+    for ax, dataset in zip(axes[0], datasets):
+        subset = [row for row in rows if row["dataset"] == dataset]
+        for model, model_rows in sorted(group_by(subset, "model").items()):
+            model_rows = sorted(model_rows, key=lambda row: row["num_languages"])
+            ax.plot(
+                [row["num_languages"] for row in model_rows],
+                [row["effective_dim"] for row in model_rows],
+                marker="o",
+                linewidth=1.5,
+                markersize=3,
+                label=model,
+            )
+        ax.set_title(pretty(dataset))
+        ax.set_xlabel("Number of languages")
+        ax.set_ylabel("Effective dimensionality")
+    axes[0][-1].legend(fontsize=8, bbox_to_anchor=(1.04, 1), loc="upper left")
+    fig.suptitle("Concept-space dimensionality by languages")
+    fig.tight_layout()
+    save_figure(
+        fig,
+        metric_dir(output_dir, LANGUAGE_GROWTH_METRIC) / "all_datasets__concept_dim_growth_by_language",
+        formats,
+    )
+
+
+def plot_growth_by_model(rows: list[dict[str, Any]], output_dir: Path, formats: list[str]) -> None:
+    for model, subset in sorted(group_by(rows, "model").items()):
+        fig, ax = plt.subplots(figsize=(8, 5))
+        for dataset, dataset_rows in sorted(group_by(subset, "dataset").items()):
+            dataset_rows = sorted(dataset_rows, key=lambda row: row["num_languages"])
+            ax.plot(
+                [row["num_languages"] for row in dataset_rows],
+                [row["effective_dim"] for row in dataset_rows],
+                marker="o",
+                linewidth=1.5,
+                markersize=3,
+                label=dataset,
+            )
+        ax.set_title(f"Concept-space dimensionality by languages for {model}")
+        ax.set_xlabel("Number of languages")
+        ax.set_ylabel("Effective dimensionality")
+        ax.legend(fontsize=8)
+        fig.tight_layout()
+        save_figure(
+            fig,
+            metric_dir(output_dir, LANGUAGE_GROWTH_METRIC)
+            / "detailed_plots"
+            / f"{slugify(model)}__concept_dim_growth_by_language",
+            formats,
+        )
 
 
 def write_csv(rows: list[dict[str, Any]], path: Path) -> None:
     if not rows:
         return
+    path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
         writer.writeheader()
@@ -180,9 +292,14 @@ def group_by(rows: list[dict[str, Any]], *keys: str) -> dict[Any, list[dict[str,
 
 
 def save_figure(fig: plt.Figure, output_base: Path, formats: list[str]) -> None:
+    output_base.parent.mkdir(parents=True, exist_ok=True)
     for fmt in formats:
         fig.savefig(output_base.with_suffix(f".{fmt}"), dpi=200, bbox_inches="tight")
     plt.close(fig)
+
+
+def metric_dir(output_dir: Path, metric: str) -> Path:
+    return output_dir / slugify(metric)
 
 
 def pretty(value: str) -> str:

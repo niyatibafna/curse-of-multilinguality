@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_INPUT_DIR = PROJECT_ROOT / "outputs"
-DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parent / "results_plots"
+DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parent / "plots"
 
 
 def main() -> None:
@@ -29,8 +29,9 @@ def main() -> None:
         raise ValueError(f"No scalar metric results found in {args.input_dir}")
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    write_summary(rows, args.output_dir / "results_summary.csv")
+    write_summary(rows, args.output_dir / "scalar_metrics_summary.csv")
     plot_by_dataset_metric(rows, args.output_dir, args.formats)
+    plot_dataset_metric_grids(rows, args.output_dir, args.formats)
     plot_by_model_metric(rows, args.output_dir, args.formats)
     plot_all_metrics(rows, args.output_dir, args.formats)
     print(f"Wrote plots to {args.output_dir}")
@@ -83,7 +84,7 @@ def plot_by_dataset_metric(rows: list[dict[str, Any]], output_dir: Path, formats
                 title=f"{pretty(metric)} on {pretty(dataset)}",
                 xlabel="Model",
                 ylabel=pretty(metric),
-                output_base=output_dir / f"{dataset}__{metric}__by_model",
+                output_base=metric_dir(output_dir, metric) / f"{dataset}__by_model",
                 formats=formats,
             )
 
@@ -106,9 +107,34 @@ def plot_by_model_metric(rows: list[dict[str, Any]], output_dir: Path, formats: 
                 title=f"{pretty(metric)} for {model}",
                 xlabel="Dataset",
                 ylabel=pretty(metric),
-                output_base=output_dir / f"{slugify(model)}__{metric}__by_dataset",
+                output_base=metric_dir(output_dir, metric) / "detailed_plots" / f"{slugify(model)}__by_dataset",
                 formats=formats,
             )
+
+
+def plot_dataset_metric_grids(rows: list[dict[str, Any]], output_dir: Path, formats: list[str]) -> None:
+    datasets = sorted({row["dataset"] for row in rows})
+    metrics = sorted({row["metric"] for row in rows})
+
+    for metric in metrics:
+        fig, axes = plt.subplots(1, len(datasets), figsize=(max(5 * len(datasets), 8), 4.5), squeeze=False)
+        for ax, dataset in zip(axes[0], datasets):
+            subset = sorted(
+                [row for row in rows if row["dataset"] == dataset and row["metric"] == metric],
+                key=lambda row: row["value"],
+                reverse=True,
+            )
+            ax.bar([row["model"] for row in subset], [row["value"] for row in subset], color="#4C78A8")
+            ax.set_title(pretty(dataset))
+            ax.set_xlabel("Model")
+            ax.set_ylabel(pretty(metric))
+            ax.tick_params(axis="x", labelrotation=45)
+            for tick in ax.get_xticklabels():
+                tick.set_horizontalalignment("right")
+            add_value_labels(ax)
+        fig.suptitle(pretty(metric))
+        fig.tight_layout()
+        save_figure(fig, metric_dir(output_dir, metric) / "all_datasets__by_model", formats)
 
 
 def plot_all_metrics(rows: list[dict[str, Any]], output_dir: Path, formats: list[str]) -> None:
@@ -140,7 +166,7 @@ def plot_all_metrics(rows: list[dict[str, Any]], output_dir: Path, formats: list
             add_value_labels(ax)
 
     fig.tight_layout()
-    save_figure(fig, output_dir / "all_datasets__all_metrics", formats)
+    save_figure(fig, metric_dir(output_dir, "all_metrics") / "all_datasets__all_metrics", formats)
 
 
 def plot_bars(
@@ -183,9 +209,14 @@ def add_value_labels(ax: plt.Axes) -> None:
 
 
 def save_figure(fig: plt.Figure, output_base: Path, formats: list[str]) -> None:
+    output_base.parent.mkdir(parents=True, exist_ok=True)
     for fmt in formats:
         fig.savefig(output_base.with_suffix(f".{fmt}"), dpi=200, bbox_inches="tight")
     plt.close(fig)
+
+
+def metric_dir(output_dir: Path, metric: str) -> Path:
+    return output_dir / slugify(metric)
 
 
 def row_key(row: dict[str, Any]) -> tuple[str, str, str]:
