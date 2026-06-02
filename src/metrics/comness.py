@@ -48,10 +48,8 @@ class Comness(COMMetric):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.effective_rank_method = kwargs.get("effective_rank_method", "stable")
-        print(f"Effective rank method: {self.effective_rank_method}")
         if self.effective_rank_method == "threshold":
             self.singular_value_threshold = kwargs.get("singular_value_threshold", 1e-12)
-            print(f"Singular value threshold: {self.singular_value_threshold}")
 
     def compute(self) -> float | tuple[float, dict[str, Any]]:
         X = self._stack_by_language()
@@ -69,6 +67,7 @@ class Comness(COMMetric):
         score = 0.0 if denom <= np.finfo(float).eps else d_lang / denom
 
         if self.return_details:
+            normalized = self._normalized_comness_details(X, d_lang, d_concept)
             details: dict[str, Any] = {
                 "d_lang": d_lang,
                 "d_concept": d_concept,
@@ -81,6 +80,7 @@ class Comness(COMMetric):
                 "effective_rank_method": self.kwargs.get("effective_rank_method", "stable"),
                 "normalize": self.normalize,
             }
+            details.update(normalized)
             return score, details
 
         return score
@@ -159,6 +159,60 @@ class Comness(COMMetric):
             embedding_dim=self.embedding_dim,
             **self._effective_rank_kwargs(),
         )
+
+    def _normalized_comness_details(
+        self,
+        X: np.ndarray,
+        d_lang: float,
+        d_concept: float,
+    ) -> dict[str, Any]:
+        rng = self._random_baseline_rng()
+        pool = X.reshape(-1, self.embedding_dim)
+        lang_baseline = self._random_baseline(
+            pool=pool,
+            group_sizes=[self.num_languages] * self.num_concepts,
+            rng=rng,
+            normalize_by_dim=False,
+        )
+        concept_baseline = self._random_baseline(
+            pool=pool,
+            group_sizes=[self.num_concepts] * self.num_languages,
+            rng=rng,
+            normalize_by_dim=False,
+        )
+        if not lang_baseline or not concept_baseline:
+            return {}
+
+        d_lang_ratio = self._ratio(
+            d_lang,
+            lang_baseline["random_effective_dim_mean"],
+        )
+        d_concept_ratio = self._ratio(
+            d_concept,
+            concept_baseline["random_effective_dim_mean"],
+        )
+        normalized_comness = None
+        if d_lang_ratio is not None and d_concept_ratio is not None:
+            denom = d_lang_ratio + d_concept_ratio
+            if denom > np.finfo(float).eps:
+                normalized_comness = d_lang_ratio / denom
+
+        return {
+            "d_lang_random_effective_dim_mean": lang_baseline["random_effective_dim_mean"],
+            "d_lang_random_effective_dim_std": lang_baseline["random_effective_dim_std"],
+            "d_concept_random_effective_dim_mean": concept_baseline["random_effective_dim_mean"],
+            "d_concept_random_effective_dim_std": concept_baseline["random_effective_dim_std"],
+            "d_lang_ratio": d_lang_ratio,
+            "d_concept_ratio": d_concept_ratio,
+            "normalized_comness": normalized_comness,
+            "random_baseline_trials": lang_baseline["random_baseline_trials"],
+            "random_baseline_seed": self._random_baseline_seed(),
+        }
+
+    def _ratio(self, observed: float, random_mean: float) -> float | None:
+        if random_mean <= np.finfo(float).eps:
+            return None
+        return observed / random_mean
 
     def _num_pairs(self, n: int) -> int:
         return n * (n - 1) // 2

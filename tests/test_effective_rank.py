@@ -4,6 +4,7 @@ import unittest
 
 import numpy as np
 
+from src.metrics.comness import Comness
 from src.metrics.concept_space_dimensionality import (
     ConceptSpaceDimGrowthByConcept,
     ConceptSpaceDimGrowthByLanguage,
@@ -17,6 +18,7 @@ from src.metrics.utils import (
     effective_rank,
     effective_rank_from_singular_values,
     pairwise_displacement_effective_rank,
+    random_baseline_effective_rank,
     random_groups_like,
 )
 
@@ -287,6 +289,99 @@ class ConceptDimensionalityMetricsTest(unittest.TestCase):
             normalized["concept_space_dim_growth_by_concept"][0]["effective_dim"],
             absolute["concept_space_dim_growth_by_concept"][0]["effective_dim"] / 2,
         )
+
+
+class ComnessTest(unittest.TestCase):
+    def setUp(self):
+        self.embeddings = {
+            "a": np.array([
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [0.0, 0.0, 1.0],
+                [1.0, 1.0, 0.0],
+            ]),
+            "b": np.array([
+                [1.0, 0.5, 0.0],
+                [0.0, 1.0, 0.5],
+                [0.5, 0.0, 1.0],
+                [1.0, 0.5, 0.5],
+            ]),
+            "c": np.array([
+                [0.5, 1.0, 0.0],
+                [0.0, 0.5, 1.0],
+                [1.0, 0.0, 0.5],
+                [0.5, 1.0, 0.5],
+            ]),
+        }
+
+    def test_reports_random_baseline_normalized_comness(self):
+        score, details = Comness(
+            self.embeddings,
+            num_concepts=4,
+            num_languages=3,
+            embedding_dim=3,
+            normalize=False,
+            return_details=True,
+            random_baseline_trials=2,
+            random_baseline_seed=123,
+        ).compute()
+
+        self.assertGreaterEqual(score, 0.0)
+        self.assertIn("normalized_comness", details)
+        self.assertIn("d_lang_ratio", details)
+        self.assertIn("d_concept_ratio", details)
+        self.assertEqual(details["random_baseline_trials"], 2)
+
+    def test_comness_random_baselines_match_language_and_concept_group_shapes(self):
+        _, details = Comness(
+            self.embeddings,
+            num_concepts=4,
+            num_languages=3,
+            embedding_dim=3,
+            normalize=False,
+            return_details=True,
+            random_baseline_trials=2,
+            random_baseline_seed=123,
+        ).compute()
+        pool = np.vstack(list(self.embeddings.values()))
+        rng = np.random.default_rng(123)
+        lang_baseline = random_baseline_effective_rank(
+            pool,
+            [3] * 4,
+            embedding_dim=3,
+            trials=2,
+            rng=rng,
+        )
+        concept_baseline = random_baseline_effective_rank(
+            pool,
+            [4] * 3,
+            embedding_dim=3,
+            trials=2,
+            rng=rng,
+        )
+
+        self.assertAlmostEqual(
+            details["d_lang_random_effective_dim_mean"],
+            lang_baseline["random_effective_dim_mean"],
+        )
+        self.assertAlmostEqual(
+            details["d_concept_random_effective_dim_mean"],
+            concept_baseline["random_effective_dim_mean"],
+        )
+
+    def test_random_baseline_trials_zero_keeps_legacy_details_only(self):
+        _, details = Comness(
+            self.embeddings,
+            num_concepts=4,
+            num_languages=3,
+            embedding_dim=3,
+            normalize=False,
+            return_details=True,
+            random_baseline_trials=0,
+        ).compute()
+
+        self.assertIn("d_lang", details)
+        self.assertNotIn("normalized_comness", details)
 
 
 class LanguageSubspaceDimensionalityMetricsTest(unittest.TestCase):
