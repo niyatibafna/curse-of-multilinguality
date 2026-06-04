@@ -4,7 +4,7 @@ import unittest
 
 import numpy as np
 
-from src.scripts.run_metrics import embedding_cache_metadata, slice_embeddings
+from src.scripts.run_metrics import embedding_cache_metadata, resolve_pooling, slice_embeddings
 
 
 class EmbeddingCacheTest(unittest.TestCase):
@@ -47,6 +47,11 @@ class EmbeddingCacheTest(unittest.TestCase):
         embeddings = {"en": np.zeros((2, 3))}
 
         self.assertIs(slice_embeddings(embeddings, None), embeddings)
+
+    def test_resolve_pooling_uses_model_default(self):
+        self.assertEqual(resolve_pooling("mbert", None), "cls")
+        self.assertEqual(resolve_pooling("llama", None), "last_token")
+        self.assertEqual(resolve_pooling("mbert", "mean"), "mean")
 
 
 if __name__ == "__main__":

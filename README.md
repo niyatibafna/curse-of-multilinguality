@@ -7,7 +7,7 @@ language variation instead of concept variation.
 
 - `src/data/`: parallel dataset loaders and formatting to `{id, data, metadata}` rows.
 - `src/models/`: embedding model wrappers and model registry.
-- `src/metrics/`: metric implementations (`anisotropy`, `comness`).
+- `src/metrics/`: metric implementations (`anisotropy`, `comness`, subspace overlap).
 - `src/scripts/run_metrics.py`: main experiment entrypoint.
 - `tests/`: lightweight dataset/cache behavior tests.
 - `misc/results_vis/`: plotting helpers.
@@ -104,9 +104,11 @@ Useful args:
 
 - `--models`: comma-separated registry keys 
 - `--datasets`: comma-separated dataset keys.
-- `--metrics`: `anisotropy`, `comness`, or both.
+- `--metrics`: comma-separated metric keys, e.g. `anisotropy`, `comness`,
+  `concept_language_principal_angle_overlap`.
 - `--layer`: hidden-state layer for transformer wrappers; default `-1`.
-- `--pooling`: `last_token`, `mean`, or `tokens`; default `last_token`.
+- `--pooling`: override model pooling. Defaults are model-specific:
+  `cls` for `mbert`, `last_token` otherwise.
 - `--device`: e.g. `cuda`, `cuda:0`, `cpu`.
 - `--return_details True`: include diagnostic fields in metric JSON.
 - `--normalize False`: disable L2 normalization before metrics.

@@ -4,7 +4,10 @@ import unittest
 
 import numpy as np
 
-from src.metrics.comness import Comness
+from src.metrics.interaction_between_concept_and_language import (
+    Comness,
+    ConceptLanguagePrincipalAngleOverlap,
+)
 from src.metrics.concept_space_dimensionality import (
     ConceptSpaceDimGrowthByConcept,
     ConceptSpaceDimGrowthByLanguage,
@@ -15,11 +18,15 @@ from src.metrics.language_subspace_dimensionality import (
     LanguageSpaceGrowthByConcepts,
 )
 from src.metrics.utils import (
+    PairwiseDisplacementMoments,
+    centered_gram_from_moments,
     effective_rank,
     effective_rank_from_singular_values,
     pairwise_displacement_effective_rank,
+    pairwise_displacement_subspace_basis,
     random_baseline_effective_rank,
     random_groups_like,
+    stack_language_embeddings,
 )
 
 
@@ -117,6 +124,54 @@ class EffectiveRankTest(unittest.TestCase):
         groups = random_groups_like(pool, [2, 3, 5], rng)
 
         self.assertEqual([group.shape for group in groups], [(2, 3), (3, 3), (5, 3)])
+
+    def test_centered_gram_from_moments_matches_explicit_displacements(self):
+        groups = [
+            np.array([[1.0, 0.0], [0.0, 1.0], [2.0, 1.0]]),
+            np.array([[0.0, 2.0], [3.0, 1.0]]),
+        ]
+        explicit = np.vstack([
+            group[i] - group[j]
+            for group in groups
+            for i in range(group.shape[0])
+            for j in range(i + 1, group.shape[0])
+        ])
+        centered = explicit - np.mean(explicit, axis=0, keepdims=True)
+
+        moments = PairwiseDisplacementMoments(embedding_dim=2)
+        for group in groups:
+            moments.update(group)
+
+        np.testing.assert_allclose(centered_gram_from_moments(moments), centered.T @ centered)
+
+    def test_pairwise_displacement_subspace_basis_uses_energy_threshold(self):
+        groups = [np.diag([3.0, 1.0, 0.0])]
+
+        basis, dim, energy = pairwise_displacement_subspace_basis(
+            groups,
+            embedding_dim=3,
+            energy_threshold=0.8,
+        )
+
+        self.assertEqual(basis.shape, (3, dim))
+        self.assertGreaterEqual(energy, 0.8)
+        np.testing.assert_allclose(basis.T @ basis, np.eye(dim), atol=1e-12)
+
+    def test_stack_language_embeddings_validates_and_stacks(self):
+        embeddings = {
+            "en": np.array([[1.0, 0.0], [0.0, 1.0]]),
+            "fr": np.array([[2.0, 0.0], [0.0, 2.0]]),
+        }
+
+        stacked = stack_language_embeddings(
+            embeddings,
+            num_concepts=2,
+            num_languages=2,
+            embedding_dim=2,
+        )
+
+        self.assertEqual(stacked.shape, (2, 2, 2))
+        np.testing.assert_array_equal(stacked[0], embeddings["en"])
 
 
 class ConceptDimensionalityMetricsTest(unittest.TestCase):
@@ -382,6 +437,114 @@ class ComnessTest(unittest.TestCase):
 
         self.assertIn("d_lang", details)
         self.assertNotIn("normalized_comness", details)
+
+
+class ConceptLanguagePrincipalAngleOverlapTest(unittest.TestCase):
+    def setUp(self):
+        self.embeddings = {
+            "a": np.array([
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [2.0, 0.0, 0.0],
+            ]),
+            "b": np.array([
+                [0.0, 1.0, 0.0],
+                [1.0, 1.0, 0.0],
+                [2.0, 1.0, 0.0],
+            ]),
+            "c": np.array([
+                [0.0, 2.0, 0.0],
+                [1.0, 2.0, 0.0],
+                [2.0, 2.0, 0.0],
+            ]),
+        }
+
+    def test_reports_orthogonal_concept_and_language_subspaces(self):
+        result = ConceptLanguagePrincipalAngleOverlap(
+            self.embeddings,
+            num_concepts=3,
+            num_languages=3,
+            embedding_dim=3,
+            normalize=False,
+        ).compute()
+
+        self.assertAlmostEqual(result["mean_squared_cosine"], 0.0)
+        self.assertAlmostEqual(result["max_cosine"], 0.0)
+        self.assertEqual(result["concept_subspace_dim"], 1)
+        self.assertEqual(result["language_subspace_dim"], 1)
+        self.assertAlmostEqual(result["random_expected_mean_squared_cosine"], 1 / 3)
+        self.assertAlmostEqual(result["adjusted_mean_squared_cosine"], -0.5)
+
+    def test_matches_explicit_principal_angles(self):
+        embeddings = {
+            "a": np.array([
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+            ]),
+            "b": np.array([
+                [0.0, 0.0, 0.0],
+                [1.0, 1.0, 0.0],
+                [0.0, 2.0, 0.0],
+            ]),
+        }
+        result = ConceptLanguagePrincipalAngleOverlap(
+            embeddings,
+            num_concepts=3,
+            num_languages=2,
+            embedding_dim=3,
+            normalize=False,
+            subspace_energy_threshold=1.0,
+        ).compute()
+
+        concept = np.vstack([
+            matrix[i] - matrix[j]
+            for matrix in embeddings.values()
+            for i in range(3)
+            for j in range(i + 1, 3)
+        ])
+        languages = list(embeddings)
+        language = np.vstack([
+            embeddings[languages[i]][concept_index]
+            - embeddings[languages[j]][concept_index]
+            for concept_index in range(3)
+            for i in range(len(languages))
+            for j in range(i + 1, len(languages))
+        ])
+        expected = _principal_angle_cosines(concept, language)
+
+        np.testing.assert_allclose(
+            result["principal_angle_cosines"],
+            expected,
+            atol=1e-12,
+        )
+        self.assertAlmostEqual(
+            result["mean_squared_cosine"],
+            float(np.mean(expected ** 2)),
+        )
+        random_expected = max(
+            result["concept_subspace_dim"],
+            result["language_subspace_dim"],
+        ) / 3
+        self.assertAlmostEqual(
+            result["random_expected_mean_squared_cosine"],
+            random_expected,
+        )
+        if random_expected < 1:
+            self.assertAlmostEqual(
+                result["adjusted_mean_squared_cosine"],
+                (result["mean_squared_cosine"] - random_expected) / (1 - random_expected),
+            )
+
+
+def _principal_angle_cosines(first: np.ndarray, second: np.ndarray) -> np.ndarray:
+    first = first - np.mean(first, axis=0, keepdims=True)
+    second = second - np.mean(second, axis=0, keepdims=True)
+    _, first_singular_values, first_vt = np.linalg.svd(first, full_matrices=False)
+    _, second_singular_values, second_vt = np.linalg.svd(second, full_matrices=False)
+    first_basis = first_vt[first_singular_values > np.finfo(float).eps].T
+    second_basis = second_vt[second_singular_values > np.finfo(float).eps].T
+    return np.linalg.svd(first_basis.T @ second_basis, compute_uv=False)
 
 
 class LanguageSubspaceDimensionalityMetricsTest(unittest.TestCase):

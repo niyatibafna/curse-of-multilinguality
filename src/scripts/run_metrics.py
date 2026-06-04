@@ -18,6 +18,7 @@ from src.data import load_dataset
 from src.metrics import (
     Anisotropy,
     Comness,
+    ConceptLanguagePrincipalAngleOverlap,
     ConceptSpaceDimGrowthByConcept,
     ConceptSpaceDimGrowthByLanguage,
     IndividualLanguageConceptDimensionality,
@@ -30,11 +31,25 @@ from src.models import MODEL_REGISTRY, EmbeddingModel, load_model
 METRICS = {
     "anisotropy": Anisotropy,
     "comness": Comness,
+    "concept_language_principal_angle_overlap": ConceptLanguagePrincipalAngleOverlap,
+    "concept_language_principal_angle_overlap_20": ConceptLanguagePrincipalAngleOverlap,
+    "concept_language_principal_angle_overlap_50": ConceptLanguagePrincipalAngleOverlap,
+    "concept_language_principal_angle_overlap_90": ConceptLanguagePrincipalAngleOverlap,
     "concept_space_dim_growth_by_concept": ConceptSpaceDimGrowthByConcept,
     "concept_space_dim_growth_by_language": ConceptSpaceDimGrowthByLanguage,
     "individual_concept_dimensionality": IndividualLanguageConceptDimensionality,
     "language_space_dim_growth_by_language": LanguageSpaceDimGrowthByLanguage,
     "language_space_growth_by_concepts": LanguageSpaceGrowthByConcepts,
+}
+
+METRIC_DEFAULT_KWARGS = {
+    "concept_language_principal_angle_overlap_20": {"subspace_energy_threshold": 0.2},
+    "concept_language_principal_angle_overlap_50": {"subspace_energy_threshold": 0.5},
+    "concept_language_principal_angle_overlap_90": {"subspace_energy_threshold": 0.9},
+}
+
+DEFAULT_POOLING = {
+    "mbert": "cls",
 }
 
 
@@ -49,7 +64,7 @@ def main(
     max_texts: int | None = None,
     layer: int = -1,
     batch_size: int = 32,
-    pooling: str = "last_token",
+    pooling: str | None = None,
     device: str | None = None,
     return_details: bool = False,
     normalize: bool = True,
@@ -78,6 +93,7 @@ def main(
 
         for model_name in models:
             model_key = model_type or model_name
+            model_pooling = resolve_pooling(model_key, pooling)
             model_kwargs = {"layer": layer, "device": device}
             if model_type is not None:
                 model_kwargs["model_name_or_path"] = model_name
@@ -92,7 +108,7 @@ def main(
                 texts=texts,
                 layer=layer,
                 batch_size=batch_size,
-                pooling=pooling,
+                pooling=model_pooling,
             )
             cache_path = embedding_cache_path(cache_metadata)
             embeddings = read_embedding_cache(cache_path, cache_metadata)
@@ -113,8 +129,11 @@ def main(
                     try:
                         log(f"loading model={model_name} model_type={model_key}")
                         model = load_model(model_key, **model_kwargs)
-                        log(f"encoding model={model_name} dataset={dataset_name}")
-                        embeddings = embed_texts(model, texts, languages, batch_size, pooling)
+                        log(
+                            f"encoding model={model_name} dataset={dataset_name} "
+                            f"pooling={model_pooling}"
+                        )
+                        embeddings = embed_texts(model, texts, languages, batch_size, model_pooling)
                         write_embedding_cache(cache_path, cache_metadata, embeddings)
                         log(f"wrote embedding cache {cache_path}")
                     finally:
@@ -258,6 +277,10 @@ def compute_metric(
     **metric_kwargs: Any,
 ) -> Any:
     first = next(iter(embeddings.values()))
+    metric_kwargs = {
+        **METRIC_DEFAULT_KWARGS.get(metric_name, {}),
+        **metric_kwargs,
+    }
     metric = METRICS[metric_name](
         embeddings,
         num_concepts=first.shape[0],
@@ -283,6 +306,12 @@ def validate_choices(name: str, values: list[str], choices: dict[str, Any]) -> N
     if unknown:
         valid = ", ".join(sorted(choices))
         raise ValueError(f"Unknown {name} {unknown}. Available: {valid}")
+
+
+def resolve_pooling(model_key: str, pooling: str | None) -> str:
+    if pooling is not None:
+        return pooling
+    return DEFAULT_POOLING.get(model_key, "last_token")
 
 
 def output_file(output_dir: Path, model_name: str, dataset_name: str, metric_name: str) -> Path:
