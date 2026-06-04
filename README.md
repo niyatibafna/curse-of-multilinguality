@@ -1,85 +1,49 @@
 # curse-of-multilinguality
 
-Metrics for measuring how much multilingual embedding spaces spend capacity on
-language variation instead of concept variation.
+We want to study real embedding spaces with respect to our arguments about the curse of multilinguality.
 
-## Repo Structure
+## Project Layout
 
-- `src/data/`: parallel dataset loaders and formatting to `{id, data, metadata}` rows.
-- `src/models/`: embedding model wrappers and model registry.
-- `src/metrics/`: metric implementations (`anisotropy`, `comness`, subspace overlap).
-- `src/scripts/run_metrics.py`: main experiment entrypoint.
-- `tests/`: lightweight dataset/cache behavior tests.
-- `misc/results_vis/`: plotting helpers.
-
-## Directory Conventions
-
-- `outputs/`: the only active location for metric JSON. All metrics, including
-  COMness, write to `outputs/<model>/<dataset>/<metric>.json`.
-- `outputs_archive/`: timestamped snapshots of old `outputs/` trees before
-  reruns that would overwrite many results.
-- `misc/results_vis/plots/`: the only location for generated plot artifacts
-  (`.png`, `.pdf`, `.svg`, `.csv`). Plot scripts read from `outputs/` and write
-  under this directory.
-- `misc/results_vis/plots/preliminary_<name>/`: temporary or partial plots.
-- `slurm_logs/`: SLURM stdout/stderr logs only.
-- `$DATADIR/projects/curse-of-multilinguality/`: dataset and embedding caches
-  only, not metric JSON or plots.
-
-Do not create metric-specific output roots such as `outputs_comness/` or
-`outputs_scaling/`, and do not put generated plots directly under
-`misc/results_vis/` or the repo root.
+- `src/data/`: dataset adapters for aligned multilingual text.
+- `src/models/`: embedding model wrappers and registry.
+- `src/metrics/`: metric implementations and metric math notes.
+- `src/scripts/run_metrics.py`: main experiment runner.
+- `misc/results_vis/`: plotting scripts.
+- `tests/`: focused tests for datasets, caches, and metric math.
 
 ## Metrics
 
-- `anisotropy`: mean off-diagonal cosine similarity over all embeddings; high means vectors share a common direction.
-- `COMness`: `d_lang / (d_lang + d_concept)`, where `d_lang` is the effective rank of same-concept cross-language displacements and `d_concept` is the effective rank of same-language concept displacements.
-  - Intuition: high COMness means language identity occupies many effective dimensions relative to semantic concept variation.
-  - Efficiency: This would require a matrix of (combinatorial) pairwise difference vectors of which we then find singular values. This is too large to keep in memory; instead, the code accumulates centered Gram moments and gets singular values from eigenvalues of `M_c.T @ M_c`.
+The main metric families are:
 
-## Models
+- `anisotropy`: mean off-diagonal cosine similarity across embeddings.
+- `comness`: compares effective dimensionality of language variation to concept
+  variation.
+- `concept_language_principal_angle_overlap`: measures overlap between retained
+  concept and language displacement subspaces using principal angles.
+- dimensionality/growth metrics: track how concept or language subspace
+  effective dimensionality changes as languages or concepts are added.
 
-Registry keys in `src/models/registry.py`:
+See [src/metrics/README.md](src/metrics/README.md) for definitions, formulas,
+and interpretation caveats.
 
-- `llama`: `meta-llama/Llama-3.1-8B-Instruct`
-- `mbert`: `bert-base-multilingual-uncased`
-- `mistral`: `mistralai/Ministral-8B-Instruct-2410`
-- `openai-large`: `text-embedding-3-large`
-- `minilm`: `sentence-transformers/all-MiniLM-L6-v2`
-- `bge-small`: `BAAI/bge-small-en-v1.5`
-- `bge-base`: `BAAI/bge-base-en-v1.5`
-- `e5-base`: `intfloat/e5-base-v2`
-- `e5-large`: `intfloat/e5-large-v2`
-- `nomic`: `nomic-ai/nomic-embed-text-v1.5`
+## Setup
 
-Use `--model_type` to run an arbitrary model path with an existing wrapper, e.g.
-`--models meta-llama/... --model_type llama`.
-
-## Datasets
-
-Registry keys in `src/data/registry.py`:
-
-- `bouquet`, `facebook/bouquet`
-- `floresplus`, `flores+`
-- `wmt24++`, `wmt24pp`
-
-All are converted to multiparallel rows before embedding. Use
-`--dataset_languages` to limit downloaded/config languages and `--eval_languages`
-to limit languages used in metrics.
-
-## Quickstart
-
-Set data/cache root for storing caches of multiparallel data and computed embeddings:
+Set a data/cache root:
 
 ```bash
 export DATADIR=/path/to/data
 ```
 
-Project data goes under:
+Project caches are stored under:
 
 ```bash
 $DATADIR/projects/curse-of-multilinguality/
 ```
+
+`OPENAI_KEY` is required only for `openai-large`. Hugging Face auth may be
+needed for gated models or datasets such as Llama and FLORES+.
+
+## Quickstart
 
 Run a small local smoke test:
 
@@ -100,24 +64,72 @@ Outputs:
 - embedding cache: `$DATADIR/projects/curse-of-multilinguality/embeddings/*.npz`
 - metric JSON: `outputs/<model>/<dataset>/<metric>.json`
 
-Useful args:
+## Runner Arguments
 
-- `--models`: comma-separated registry keys 
-- `--datasets`: comma-separated dataset keys.
-- `--metrics`: comma-separated metric keys, e.g. `anisotropy`, `comness`,
-  `concept_language_principal_angle_overlap`.
+Common arguments:
+
+- `--models`: comma-separated model registry keys.
+- `--datasets`: comma-separated dataset registry keys.
+- `--metrics`: comma-separated metric keys.
+- `--dataset_languages`: languages/configs to download or format.
+- `--eval_languages`: languages to include in metrics.
+- `--max_texts`: use a prefix of cached embeddings for metric computation.
 - `--layer`: hidden-state layer for transformer wrappers; default `-1`.
-- `--pooling`: override model pooling. Defaults are model-specific:
-  `cls` for `mbert`, `last_token` otherwise.
-- `--device`: e.g. `cuda`, `cuda:0`, `cpu`.
+- `--pooling`: override model pooling. Defaults are model-specific: `cls` for
+  `mbert`, `last_token` otherwise.
+- `--device`: e.g. `cuda`, `cuda:0`, or `cpu`.
 - `--return_details True`: include diagnostic fields in metric JSON.
 - `--normalize False`: disable L2 normalization before metrics.
-- `--random_baseline_trials`: random baseline samples for scaling metrics; set
-  `0` to disable. Default `1`.
-- `--random_baseline_seed`: seed for scaling-metric random baselines.
 
-Env variables:
+## Registered Models
 
-- `DATADIR`: required.
-- `OPENAI_KEY`: required only for `openai-large`.
-- Hugging Face auth may be needed for gated datasets/models such as FLORES+ or Llama.
+Registry keys in `src/models/registry.py`:
+
+- `llama`: `meta-llama/Llama-3.1-8B-Instruct`
+- `mistral`: `mistralai/Ministral-8B-Instruct-2410`
+- `mbert`: `bert-base-multilingual-uncased`
+- `openai-large`: `text-embedding-3-large`
+- `minilm`: `sentence-transformers/all-MiniLM-L6-v2`
+- `bge-small`: `BAAI/bge-small-en-v1.5`
+- `bge-base`: `BAAI/bge-base-en-v1.5`
+- `e5-base`: `intfloat/e5-base-v2`
+- `e5-large`: `intfloat/e5-large-v2`
+- `nomic`: `nomic-ai/nomic-embed-text-v1.5`
+
+Use `--model_type` to run an arbitrary model path with an existing wrapper, for
+example:
+
+```bash
+python src/scripts/run_metrics.py \
+  --models meta-llama/... \
+  --model_type llama \
+  --datasets bouquet \
+  --metrics anisotropy
+```
+
+## Registered Datasets
+
+Registry keys in `src/data/registry.py`:
+
+- `bouquet`, `facebook/bouquet`
+- `floresplus`, `flores+`
+- `wmt24++`, `wmt24pp`
+
+All adapters convert raw rows into:
+
+```python
+{"id": "...", "data": {"language": "text"}, "metadata": {...}}
+```
+
+## Plotting
+
+Plotting scripts read from `outputs/` and write under
+`misc/results_vis/plots/`.
+
+Examples:
+
+```bash
+python misc/results_vis/plot_comness.py
+python misc/results_vis/plot_principal_angle_overlap.py
+python misc/results_vis/plot_principal_angle_overlap_sweep.py
+```
