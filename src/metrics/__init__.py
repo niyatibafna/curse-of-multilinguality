@@ -9,12 +9,16 @@ from .language_subspace_dimensionality import (
     LanguageSpaceGrowthByConcepts,
 )
 from .metrics import COMMetric  
-from .comness import Comness
+from .interaction_between_concept_and_language import (
+    Comness,
+    ConceptLanguagePrincipalAngleOverlap,
+)
 
 __all__ = [
     "Anisotropy",
     "COMMetric",
     "Comness",
+    "ConceptLanguagePrincipalAngleOverlap",
     "ConceptSpaceDimGrowthByConcept",
     "ConceptSpaceDimGrowthByLanguage",
     "IndividualLanguageConceptDimensionality",

@@ -5,7 +5,11 @@ from typing import Any
 import numpy as np
 
 from .metrics import COMMetric
-from .utils import pairwise_displacement_effective_rank
+from .utils import (
+    pairwise_displacement_effective_rank,
+    pairwise_displacement_subspace_basis,
+    stack_language_embeddings,
+)
 
 
 class Comness(COMMetric):
@@ -52,7 +56,12 @@ class Comness(COMMetric):
             self.singular_value_threshold = kwargs.get("singular_value_threshold", 1e-12)
 
     def compute(self) -> float | tuple[float, dict[str, Any]]:
-        X = self._stack_by_language()
+        X = stack_language_embeddings(
+            self.X,
+            self.num_concepts,
+            self.num_languages,
+            self.embedding_dim,
+        )
 
         if self.normalize:
             X = self._normalize_embeddings(X)
@@ -84,35 +93,6 @@ class Comness(COMMetric):
             return score, details
 
         return score
-
-    def _stack_by_language(self) -> np.ndarray:
-        """
-        Returns an array with shape:
-            (num_languages, num_concepts, embedding_dim)
-        """
-        if len(self.X) != self.num_languages:
-            raise ValueError(
-                f"Expected {self.num_languages} languages, got {len(self.X)}."
-            )
-
-        arrays: list[np.ndarray] = []
-
-        for lang, embeddings in self.X.items():
-            arr = np.asarray(embeddings, dtype=float)
-
-            expected_shape = (self.num_concepts, self.embedding_dim)
-            if arr.shape != expected_shape:
-                raise ValueError(
-                    f"Expected X[{lang!r}] to have shape {expected_shape}, "
-                    f"got {arr.shape}."
-                )
-
-            if not np.all(np.isfinite(arr)):
-                raise ValueError(f"X[{lang!r}] contains NaN or infinite values.")
-
-            arrays.append(arr)
-
-        return np.stack(arrays, axis=0)
 
     def _normalize_embeddings(self, X: np.ndarray) -> np.ndarray:
         norms = np.linalg.norm(X, axis=-1, keepdims=True)
@@ -216,3 +196,92 @@ class Comness(COMMetric):
 
     def _num_pairs(self, n: int) -> int:
         return n * (n - 1) // 2
+
+
+class ConceptLanguagePrincipalAngleOverlap(COMMetric):
+    """Principal-angle overlap between concept and language displacement subspaces."""
+
+    def compute(self) -> dict[str, Any]:
+        X = stack_language_embeddings(
+            self.X,
+            self.num_concepts,
+            self.num_languages,
+            self.embedding_dim,
+        )
+        if self.normalize:
+            X = self._normalize_embeddings(X)
+
+        energy_threshold = float(self.kwargs.get("subspace_energy_threshold", 0.9))
+        if not 0 < energy_threshold <= 1:
+            raise ValueError("subspace_energy_threshold must be in (0, 1].")
+
+        concept_basis, concept_dim, concept_energy = pairwise_displacement_subspace_basis(
+            (X[l] for l in range(self.num_languages)),
+            embedding_dim=self.embedding_dim,
+            energy_threshold=energy_threshold,
+        )
+        language_basis, language_dim, language_energy = pairwise_displacement_subspace_basis(
+            (X[:, c, :] for c in range(self.num_concepts)),
+            embedding_dim=self.embedding_dim,
+            energy_threshold=energy_threshold,
+        )
+
+        if concept_dim == 0 or language_dim == 0:
+            cosines = np.array([], dtype=float)
+        else:
+            cosines = np.linalg.svd(concept_basis.T @ language_basis, compute_uv=False)
+            cosines = np.clip(cosines, 0.0, 1.0)
+
+        squared_cosines = cosines ** 2
+        mean_squared_cosine = (
+            float(np.mean(squared_cosines)) if squared_cosines.size else 0.0
+        )
+        max_cosine = float(np.max(cosines)) if cosines.size else 0.0
+        principal_angles_degrees = np.degrees(np.arccos(cosines))
+        random_expected = self._random_expected_mean_squared_cosine(
+            concept_dim,
+            language_dim,
+        )
+        adjusted = self._adjusted_overlap(mean_squared_cosine, random_expected)
+
+        result: dict[str, Any] = {
+            "mean_squared_cosine": mean_squared_cosine,
+            "random_expected_mean_squared_cosine": random_expected,
+            "adjusted_mean_squared_cosine": adjusted,
+            "max_cosine": max_cosine,
+            "principal_angle_cosines": cosines.tolist(),
+            "principal_angles_degrees": principal_angles_degrees.tolist(),
+            "concept_subspace_dim": concept_dim,
+            "language_subspace_dim": language_dim,
+            "concept_energy_explained": concept_energy,
+            "language_energy_explained": language_energy,
+            "subspace_energy_threshold": energy_threshold,
+        }
+        if self.return_details:
+            result["details"] = {
+                "num_languages": self.num_languages,
+                "num_concepts": self.num_concepts,
+                "embedding_dim": self.embedding_dim,
+                "languages": list(self.X.keys()),
+                "normalize": self.normalize,
+            }
+        return result
+
+    def _normalize_embeddings(self, X: np.ndarray) -> np.ndarray:
+        norms = np.linalg.norm(X, axis=-1, keepdims=True)
+        return X / np.clip(norms, a_min=np.finfo(float).eps, a_max=None)
+
+    def _random_expected_mean_squared_cosine(
+        self,
+        concept_dim: int,
+        language_dim: int,
+    ) -> float:
+        if concept_dim == 0 or language_dim == 0:
+            return 0.0
+        return min(max(concept_dim, language_dim) / self.embedding_dim, 1.0)
+
+    def _adjusted_overlap(self, observed: float, expected: float) -> float | None:
+        denom = 1.0 - expected
+        if denom <= np.finfo(float).eps:
+            return None
+        return (observed - expected) / denom

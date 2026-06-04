@@ -10,8 +10,8 @@ $$
 Rows are aligned concepts. So $X[\ell, c] \in \mathbb{R}^D$ means "the
 embedding of concept $c$ in language $\ell$."
 
-Many of these metrics are concerned with dimensionality of the "concept subspace" or the "language
-subspace", and the scaling of this dimensionality.
+Many of these metrics are concerned with dimensionality of the "concept
+subspace" or the "language subspace", and the scaling of this dimensionality.
 
 The basic way we isolate a subspace is by taking pairwise differences. For
 example:
@@ -99,6 +99,82 @@ This keeps the original COMness score available while adding a version that
 controls for effective-rank growth caused by different numbers of sampled
 points/displacements.
 
+### `concept_language_principal_angle_overlap`
+
+Measure overlap between the concept and language displacement subspaces. First
+construct the same concept-displacement and language-displacement spaces used by
+COMness. For each space, keep the smallest set of right singular directions
+whose squared singular values explain `subspace_energy_threshold` energy
+(default `0.9`). The registered sweep aliases set this threshold explicitly:
+
+- `concept_language_principal_angle_overlap_20`: `0.2`
+- `concept_language_principal_angle_overlap_50`: `0.5`
+- `concept_language_principal_angle_overlap_90`: `0.9`
+
+Then compute principal angles between the retained orthonormal bases:
+
+$$
+\sigma_i =
+\mathrm{svd}\left(V_{\mathrm{concept}}^\top V_{\mathrm{language}}\right)_i
+= \cos(\theta_i)
+$$
+
+The main raw score is:
+
+$$
+\mathrm{overlap}_{\mathrm{raw}} =
+\frac{1}{m} \sum_{i=1}^m \sigma_i^2,
+\qquad
+m = \min(k_{\mathrm{concept}}, k_{\mathrm{language}})
+$$
+
+where $k_{\mathrm{concept}}$ and $k_{\mathrm{language}}$ are the retained
+subspace dimensions. Low values mean the retained concept and language
+subspaces are close to orthogonal; high values mean they reuse directions.
+
+Raw overlap must be interpreted with the retained dimensions. For two random
+subspaces of dimensions $k_{\mathrm{concept}}$ and $k_{\mathrm{language}}$ in
+$\mathbb{R}^D$,
+
+$$
+\mathbb{E}\left[\mathrm{tr}(P_{\mathrm{concept}}P_{\mathrm{language}})\right]
+=
+\frac{k_{\mathrm{concept}} k_{\mathrm{language}}}{D}
+$$
+
+so the expected mean squared principal-angle cosine is:
+
+$$
+\mathrm{overlap}_{\mathrm{rand}} =
+\frac{
+\mathbb{E}\left[\mathrm{tr}(P_{\mathrm{concept}}P_{\mathrm{language}})\right]
+}{
+\min(k_{\mathrm{concept}}, k_{\mathrm{language}})
+}
+=
+\frac{\max(k_{\mathrm{concept}}, k_{\mathrm{language}})}{D}
+$$
+
+The metric therefore also reports an excess-over-random score:
+
+$$
+\mathrm{overlap}_{\mathrm{adjusted}} =
+\frac{
+\mathrm{overlap}_{\mathrm{raw}} - \mathrm{overlap}_{\mathrm{rand}}
+}{
+1 - \mathrm{overlap}_{\mathrm{rand}}
+}
+$$
+
+This is `0` when overlap matches random subspaces with the same dimensions and
+`1` for perfect overlap. Values below `0` mean less overlap than that matched
+random baseline.
+
+The output includes `principal_angle_cosines`, `principal_angles_degrees`,
+`mean_squared_cosine`, `random_expected_mean_squared_cosine`,
+`adjusted_mean_squared_cosine`, `max_cosine`, retained subspace dimensions, and
+retained energy.
+
 ### `individual_concept_dimensionality`
 
 For each language independently, measure the effective dimension of concept
@@ -131,6 +207,22 @@ $$
 The output records `(num_languages, effective_dim)` and the language order. The
 desired behavior is that concept-space dimensionality should not grow much as
 more languages are added.
+
+### `concept_space_dim_growth_by_concept`
+
+Measure how concept-space dimensionality changes as more aligned concepts are
+included. For concept prefixes $C_k$, compute same-language concept
+differences:
+
+$$
+d(k) =
+d_{\mathrm{eff}}\bigl(
+\{X[\ell, c_i] - X[\ell, c_j] : \ell,\ c_i,c_j \in C_k,\ i < j\}
+\bigr)
+$$
+
+The output records `(num_concepts, effective_dim)`. This asks how quickly the
+concept subspace fills out as more semantic items are observed.
 
 ### `language_space_dim_growth_by_language`
 
@@ -242,7 +334,10 @@ sampling.
 ### Making this efficient
 
 Many metrics need the effective dimension of a matrix of pairwise difference
-vectors, computed between points belonging to a single group (e.g. a group could be all language variants of a single concept, or vice versa). The entire matrix would consist of vectors from all groups, and we now need to find the singular values for effective dimensionality of this large matrix.
+vectors, computed between points belonging to a single group. A group could be
+all language variants of a single concept, or all concepts in a single
+language. The full matrix would contain displacement vectors from all groups,
+and we need its singular values.
 We note that each group contributes only its own within-group
 differences:
 
@@ -314,10 +409,10 @@ $$
 \sum_{i < j} (x_i - x_j)(x_i - x_j)^\top
 $$
 
-So don't need to store the entire matrix, we can just loop over all difference vectors and collect the Gram matrix. 
+So we do not need to store the entire displacement matrix; we can collect its
+Gram matrix.
 
-But there's actually a closed form solution to find the contribution of each group.
-The key identity is:
+There is also a closed-form contribution for each group:
 
 $$
 \begin{aligned}
@@ -364,4 +459,3 @@ $$
 So we get the singular values needed for $d_{\mathrm{eff}}$ without storing the
 full `num_displacements x embedding_dim` matrix. Memory stays at roughly
 `embedding_dim x embedding_dim`.
-

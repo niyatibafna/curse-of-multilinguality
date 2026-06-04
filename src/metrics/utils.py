@@ -92,6 +92,64 @@ def pairwise_displacement_effective_rank(
     )
 
 
+def pairwise_displacement_subspace_basis(
+    groups: Iterable[np.ndarray],
+    embedding_dim: int,
+    energy_threshold: float = 0.9,
+) -> tuple[np.ndarray, int, float]:
+    if not 0 < energy_threshold <= 1:
+        raise ValueError("energy_threshold must be in (0, 1].")
+
+    moments = PairwiseDisplacementMoments(embedding_dim)
+    for group in groups:
+        moments.update(group)
+
+    if moments.count == 0:
+        return np.zeros((embedding_dim, 0)), 0, 0.0
+
+    covariance = centered_gram_from_moments(moments)
+    eigenvalues, eigenvectors = np.linalg.eigh(covariance)
+    order = np.argsort(eigenvalues)[::-1]
+    eigenvalues = np.clip(eigenvalues[order], a_min=0.0, a_max=None)
+    eigenvectors = eigenvectors[:, order]
+
+    positive = eigenvalues > np.finfo(float).eps
+    eigenvalues = eigenvalues[positive]
+    eigenvectors = eigenvectors[:, positive]
+    if eigenvalues.size == 0:
+        return np.zeros((embedding_dim, 0)), 0, 0.0
+
+    cumulative_energy = np.cumsum(eigenvalues) / np.sum(eigenvalues)
+    dim = min(
+        int(np.searchsorted(cumulative_energy, energy_threshold) + 1),
+        eigenvalues.size,
+    )
+    return eigenvectors[:, :dim], dim, float(cumulative_energy[dim - 1])
+
+
+def stack_language_embeddings(
+    X: dict[str, np.ndarray],
+    num_concepts: int,
+    num_languages: int,
+    embedding_dim: int,
+) -> np.ndarray:
+    if len(X) != num_languages:
+        raise ValueError(f"Expected {num_languages} languages, got {len(X)}.")
+
+    arrays = []
+    expected_shape = (num_concepts, embedding_dim)
+    for language, embeddings in X.items():
+        arr = np.asarray(embeddings, dtype=float)
+        if arr.shape != expected_shape:
+            raise ValueError(
+                f"Expected X[{language!r}] to have shape {expected_shape}, got {arr.shape}."
+            )
+        if not np.all(np.isfinite(arr)):
+            raise ValueError(f"X[{language!r}] contains NaN or infinite values.")
+        arrays.append(arr)
+    return np.stack(arrays, axis=0)
+
+
 def random_baseline_effective_rank(
     pool: np.ndarray,
     group_sizes: Iterable[int],
@@ -180,11 +238,7 @@ def effective_rank_from_moments(
     if moments.count == 0:
         return 0.0
 
-    mean = moments.total / moments.count
-    covariance = moments.gram - moments.count * np.outer(mean, mean)
-    covariance = (covariance + covariance.T) / 2
-
-    eigenvalues = np.linalg.eigvalsh(covariance)
+    eigenvalues = np.linalg.eigvalsh(centered_gram_from_moments(moments))
     singular_values = np.sqrt(np.clip(eigenvalues, a_min=0.0, a_max=None))
     return effective_rank_from_singular_values(
         singular_values,
@@ -193,6 +247,15 @@ def effective_rank_from_moments(
         normalize_by_dim=normalize_by_dim,
         embedding_dim=moments.embedding_dim,
     )
+
+
+def centered_gram_from_moments(moments: "PairwiseDisplacementMoments") -> np.ndarray:
+    if moments.count == 0:
+        return np.zeros((moments.embedding_dim, moments.embedding_dim), dtype=float)
+
+    mean = moments.total / moments.count
+    covariance = moments.gram - moments.count * np.outer(mean, mean)
+    return (covariance + covariance.T) / 2
 
 
 class PairwiseDisplacementMoments:
