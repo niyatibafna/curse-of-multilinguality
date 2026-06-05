@@ -6,3 +6,4 @@ slurm_scripts/
 *pycache*/
 AGENTS.md
 misc/results_vis/plots/
+src/utils/language_sorting/*.csv
