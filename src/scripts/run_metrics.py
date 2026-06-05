@@ -16,6 +16,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.data import load_dataset
 from src.metrics import (
+    AlignmentCondition,
     Anisotropy,
     Comness,
     ConceptLanguagePrincipalAngleOverlap,
@@ -24,11 +25,14 @@ from src.metrics import (
     IndividualLanguageConceptDimensionality,
     LanguageSpaceDimGrowthByLanguage,
     LanguageSpaceGrowthByConcepts,
+    MonolingualStructureCondition,
 )
 from src.models import MODEL_REGISTRY, EmbeddingModel, load_model
 
 
 METRICS = {
+    "alignment_condition": AlignmentCondition,
+    "alignment_condition_weak_view": AlignmentCondition,
     "anisotropy": Anisotropy,
     "comness": Comness,
     "concept_language_principal_angle_overlap": ConceptLanguagePrincipalAngleOverlap,
@@ -40,9 +44,11 @@ METRICS = {
     "individual_concept_dimensionality": IndividualLanguageConceptDimensionality,
     "language_space_dim_growth_by_language": LanguageSpaceDimGrowthByLanguage,
     "language_space_growth_by_concepts": LanguageSpaceGrowthByConcepts,
+    "monolingual_structure_condition": MonolingualStructureCondition,
 }
 
 METRIC_DEFAULT_KWARGS = {
+    "alignment_condition_weak_view": {"negative_view": "weak_view"},
     "concept_language_principal_angle_overlap_20": {"subspace_energy_threshold": 0.2},
     "concept_language_principal_angle_overlap_50": {"subspace_energy_threshold": 0.5},
     "concept_language_principal_angle_overlap_90": {"subspace_energy_threshold": 0.9},
@@ -70,6 +76,9 @@ def main(
     normalize: bool = True,
     random_baseline_trials: int = 1,
     random_baseline_seed: int = 0,
+    similarity: str = "cosine",
+    negative_view: str | None = None,
+    alignment_batch_size: int = 64,
 ) -> None:
     models = as_list(models)
     datasets = as_list(datasets)
@@ -152,13 +161,21 @@ def main(
 
             for metric_name in metrics:
                 log(f"computing metric={metric_name} model={model_name} dataset={dataset_name}")
+                extra_metric_kwargs = {
+                    "random_baseline_trials": random_baseline_trials,
+                    "random_baseline_seed": random_baseline_seed,
+                    "similarity": similarity,
+                    "alignment_batch_size": alignment_batch_size,
+                }
+                if negative_view is not None:
+                    extra_metric_kwargs["negative_view"] = negative_view
+
                 result = compute_metric(
                     metric_name,
                     metric_embeddings,
                     return_details,
                     normalize,
-                    random_baseline_trials=random_baseline_trials,
-                    random_baseline_seed=random_baseline_seed,
+                    **extra_metric_kwargs,
                 )
                 output_path = output_file(output_dir, model_name, dataset_name, metric_name)
                 output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -471,7 +488,7 @@ def as_numpy(value: Any) -> np.ndarray:
 
 def write_json(path: Path, payload: dict[str, Any]) -> None:
     with path.open("w") as handle:
-        json.dump(payload, handle, indent=2, sort_keys=True)
+        json.dump(payload, handle, indent=2)
         handle.write("\n")
 
 
