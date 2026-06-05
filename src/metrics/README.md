@@ -175,6 +175,100 @@ The output includes `principal_angle_cosines`, `principal_angles_degrees`,
 `adjusted_mean_squared_cosine`, `max_cosine`, retained subspace dimensions, and
 retained energy.
 
+### `alignment_condition`
+
+Nearest-neighbor style condition for aligned translations. For each concept
+$c$ and ordered language pair $(\ell_s, \ell_t)$, compare the same-concept
+target-language equivalent $X[\ell_t, c]$ to different-concept negatives.
+
+With the default `negative_view="strong_view"`, the condition is:
+
+$$
+\mathrm{sim}(X[\ell_s, c], X[\ell_t, c])
+>
+\max_{\ell,\ c' \ne c}
+\mathrm{sim}(X[\ell_s, c], X[\ell, c'])
+$$
+
+That is, the target equivalent must be closer to the source than every
+different concept in every language. Same-concept variants in other languages
+are intentionally excluded from the negative set.
+
+With `negative_view="weak_view"`, the negative set is restricted to the target
+language:
+
+$$
+\mathrm{sim}(X[\ell_s, c], X[\ell_t, c])
+>
+\max_{c' \ne c}
+\mathrm{sim}(X[\ell_s, c], X[\ell_t, c'])
+$$
+
+This asks whether the correct target-language translation beats all other
+target-language concepts, rather than all concepts in the full multilingual
+pool. The weak view is therefore closer to cross-lingual retrieval into a fixed
+target language; the strong view is a stricter global multilingual neighborhood
+condition.
+
+The metric uses strict inequality. Ties fail. The default similarity is
+`cosine`; supported values are `cosine`, `dot`, and `negative_squared_l2`.
+
+The main score is the fraction of successful ordered pairs:
+
+$$
+\frac{
+\sum_{\ell_s \ne \ell_t} \sum_c
+\mathbf{1}[\mathrm{condition}(c, \ell_s, \ell_t)]
+}{
+C L (L - 1)
+}
+$$
+
+The output includes the scalar `score`, total `num_success` and `num_pairs`,
+`negative_view`, `similarity`, and per-ordered-language-pair counts. Those
+language-pair counts are sufficient to recover the score for any subset of
+languages by summing `num_success` and `num_pairs` over the selected ordered
+pairs.
+
+The registered metric `alignment_condition` defaults to `strong_view`.
+`alignment_condition_weak_view` is an alias that defaults to `weak_view`.
+
+### `monolingual_structure_condition`
+
+Condition on whether languages preserve similar within-language concept
+geometry. For each language $\ell$, compute the vector of all unordered
+within-language concept-pair distances:
+
+$$
+d_\ell =
+\left[
+1 - \cos(X[\ell, c_i], X[\ell, c_j])
+\right]_{i < j}
+$$
+
+Then for every unordered language pair $(\ell_i, \ell_j)$, compute the Pearson
+correlation between their distance vectors:
+
+$$
+\rho_{\ell_i,\ell_j}
+=
+\mathrm{corr}(d_{\ell_i}, d_{\ell_j})
+$$
+
+The main score is the mean valid correlation over language pairs:
+
+$$
+\frac{1}{|\mathcal{P}_{\mathrm{valid}}|}
+\sum_{(\ell_i,\ell_j) \in \mathcal{P}_{\mathrm{valid}}}
+\rho_{\ell_i,\ell_j}
+$$
+
+Language pairs with constant distance vectors have undefined Pearson
+correlation and are omitted from the mean. The output includes the scalar
+`score`, `distance="cosine"`, `correlation="pearson"`,
+`num_concept_pairs`, `num_valid_language_pairs`, and per-language-pair
+correlations.
+
 ### `individual_concept_dimensionality`
 
 For each language independently, measure the effective dimension of concept
