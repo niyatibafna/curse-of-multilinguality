@@ -140,14 +140,12 @@ python misc/results_vis/plot_principal_angle_overlap_sweep.py
 
 The idea is to train many multilingual models with the same token budget / additive token budget, but of varying number of languages (1, 5, 10, 25, 50, 75, 100). 
 
-We will start with monolingual BERT. 
-
 
 ### Data
 We will get data from MADLAD400. 
 
 ### Languages
-We choose 100 languages from the dataset. We'll then start with a random subset, and then add more languages to it to create incrementally bigger language subsets.
+We choose 100 languages from the dataset. We'll then start with a random subset, and then add more languages to it to create incrementally bigger language subsets. (We prioritize langs in our eval datasets.)
 
 ### Data sampling strategies
 #### Fixed token budget
@@ -166,7 +164,3 @@ For each language subset, we train this model from scratch for 3 epochs.
 
 ### Optimization and other hyperparameters
 We use default learning rate and other hyperparameters. 
-
-### Checkpoints and storage
-Use an appropriate place in $DATADIR as per conventions for data and models.
-
