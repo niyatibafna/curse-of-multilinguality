@@ -115,8 +115,8 @@ Then compute principal angles between the retained orthonormal bases:
 
 $$
 \sigma_i =
-\mathrm{svd}\left(V_{\mathrm{concept}}^\top V_{\mathrm{language}}\right)_i
-= \cos(\theta_i)
+\mathrm{svd}\left(V_{\mathrm{concept}}^\top V_{\mathrm{language}}\right)_i =
+\cos(\theta_i)
 $$
 
 The main raw score is:
@@ -137,8 +137,7 @@ subspaces of dimensions $k_{\mathrm{concept}}$ and $k_{\mathrm{language}}$ in
 $\mathbb{R}^D$,
 
 $$
-\mathbb{E}\left[\mathrm{tr}(P_{\mathrm{concept}}P_{\mathrm{language}})\right]
-=
+\mathbb{E}\left[\mathrm{tr}(P_{\mathrm{concept}}P_{\mathrm{language}})\right] =
 \frac{k_{\mathrm{concept}} k_{\mathrm{language}}}{D}
 $$
 
@@ -146,11 +145,8 @@ so the expected mean squared principal-angle cosine is:
 
 $$
 \mathrm{overlap}_{\mathrm{rand}} =
-\frac{
-\mathbb{E}\left[\mathrm{tr}(P_{\mathrm{concept}}P_{\mathrm{language}})\right]
-}{
-\min(k_{\mathrm{concept}}, k_{\mathrm{language}})
-}
+\frac{\mathbb{E}\left[\mathrm{tr}(P_{\mathrm{concept}}P_{\mathrm{language}})\right]}
+{\min(k_{\mathrm{concept}}, k_{\mathrm{language}})}
 =
 \frac{\max(k_{\mathrm{concept}}, k_{\mathrm{language}})}{D}
 $$
@@ -159,11 +155,8 @@ The metric therefore also reports an excess-over-random score:
 
 $$
 \mathrm{overlap}_{\mathrm{adjusted}} =
-\frac{
-\mathrm{overlap}_{\mathrm{raw}} - \mathrm{overlap}_{\mathrm{rand}}
-}{
-1 - \mathrm{overlap}_{\mathrm{rand}}
-}
+\frac{\mathrm{overlap}_{\mathrm{raw}} - \mathrm{overlap}_{\mathrm{rand}}}
+{1 - \mathrm{overlap}_{\mathrm{rand}}}
 $$
 
 This is `0` when overlap matches random subspaces with the same dimensions and
@@ -184,10 +177,8 @@ target-language equivalent $X[\ell_t, c]$ to different-concept negatives.
 With the default `negative_view="strong_view"`, the condition is:
 
 $$
-\mathrm{sim}(X[\ell_s, c], X[\ell_t, c])
->
-\max_{\ell,\ c' \ne c}
-\mathrm{sim}(X[\ell_s, c], X[\ell, c'])
+\mathrm{sim}(X[\ell_s, c], X[\ell_t, c]) >
+\max_{\ell,\ c' \ne c}\mathrm{sim}(X[\ell_s, c], X[\ell, c'])
 $$
 
 That is, the target equivalent must be closer to the source than every
@@ -198,10 +189,8 @@ With `negative_view="weak_view"`, the negative set is restricted to the target
 language:
 
 $$
-\mathrm{sim}(X[\ell_s, c], X[\ell_t, c])
->
-\max_{c' \ne c}
-\mathrm{sim}(X[\ell_s, c], X[\ell_t, c'])
+\mathrm{sim}(X[\ell_s, c], X[\ell_t, c]) >
+\max_{c' \ne c}\mathrm{sim}(X[\ell_s, c], X[\ell_t, c'])
 $$
 
 This asks whether the correct target-language translation beats all other
@@ -216,12 +205,8 @@ The metric uses strict inequality. Ties fail. The default similarity is
 The main score is the fraction of successful ordered pairs:
 
 $$
-\frac{
-\sum_{\ell_s \ne \ell_t} \sum_c
-\mathbf{1}[\mathrm{condition}(c, \ell_s, \ell_t)]
-}{
-C L (L - 1)
-}
+\frac{\sum_{\ell_s \ne \ell_t} \sum_c \mathbf{1}[\mathrm{condition}(c, \ell_s, \ell_t)]}
+{C L (L - 1)}
 $$
 
 The output includes the scalar `score`, total `num_success` and `num_pairs`,
