@@ -263,11 +263,25 @@ $$
 \rho_{\ell_i,\ell_j}
 $$
 
-Language pairs with constant distance vectors have undefined Pearson
-correlation and are omitted from the mean. The output includes the scalar
-`score`, `distance="cosine"`, `correlation="pearson"`,
-`num_concept_pairs`, `num_valid_language_pairs`, and per-language-pair
-correlations.
+Language pairs with constant distance vectors have undefined Pearson and
+Spearman correlations and are omitted from the correlation means.
+
+The scalar `score` remains the mean valid Pearson correlation for compatibility.
+The metric also reports complementary aggregate means and per-language-pair
+values:
+
+- `spearman`: rank-order similarity of pairwise distances
+- `mae` and `rmse`: raw absolute distance errors
+- `normalized_rmse`: RMSE divided by the average mean distance
+- `centered_rmse`: RMSE after subtracting each language's mean distance
+- `standardized_rmse`: RMSE after z-scoring each language's distance vector
+- `mean_distance_ratio`: second language mean distance divided by first
+- `std_distance_ratio`: second language distance standard deviation divided by
+  first
+
+These distinguish "same relative structure" from actual metric agreement. For
+example, high Pearson with high raw RMSE suggests similar ordering/shape but a
+shifted or rescaled distance geometry.
 
 ### `individual_concept_dimensionality`
 
@@ -471,26 +485,11 @@ $M_c M_c^\top$, would be `num_displacements x num_displacements`, which is the
 large object we are trying to avoid.
 
 First ignore centering and construct $M^\top M$. Since $M$ is a vertical stack,
+the Gram matrix decomposes as:
 
 $$
-\begin{aligned}
-M^\top M
-&=
-\begin{bmatrix}
-(M^{(1)})^\top & (M^{(2)})^\top & \cdots & (M^{(G)})^\top
-\end{bmatrix}
-\begin{bmatrix}
-M^{(1)} \\
-M^{(2)} \\
-\vdots \\
-M^{(G)}
-\end{bmatrix}
-\end{aligned}
+M^\top M = \sum_g (M^{(g)})^\top M^{(g)}
 $$
-
-so
-
-$$M^\top M = \sum_g (M^{(g)})^\top M^{(g)}$$
 
 There are no cross-group terms here. (Cross terms would appear in $MM^\top$, not
 in $M^\top M$. Both have the same non-zero eigenvalues but we'll use this for convenience.) Since we only need $M^\top M$, each group can be processed
@@ -509,11 +508,9 @@ Gram matrix.
 There is also a closed-form contribution for each group:
 
 $$
-\begin{aligned}
 \sum_{i < j} (x_i - x_j)(x_i - x_j)^\top
-&= n \sum_i x_i x_i^\top \\
-&\quad - \bigl(\sum_i x_i\bigr)\bigl(\sum_i x_i\bigr)^\top
-\end{aligned}
+= n \sum_i x_i x_i^\top
+- \bigl(\sum_i x_i\bigr)\bigl(\sum_i x_i\bigr)^\top
 $$
 
 This lets us add one group’s contribution to $M^\top M$ using only the group’s
