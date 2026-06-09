@@ -146,8 +146,7 @@ so the expected mean squared principal-angle cosine is:
 $$
 \mathrm{overlap}_{\mathrm{rand}} =
 \frac{\mathbb{E}\left[\mathrm{tr}(P_{\mathrm{concept}}P_{\mathrm{language}})\right]}
-{\min(k_{\mathrm{concept}}, k_{\mathrm{language}})}
-=
+{\min(k_{\mathrm{concept}}, k_{\mathrm{language}})} =
 \frac{\max(k_{\mathrm{concept}}, k_{\mathrm{language}})}{D}
 $$
 
@@ -235,8 +234,7 @@ Then for every unordered language pair $(\ell_i, \ell_j)$, compute the Pearson
 correlation between their distance vectors:
 
 $$
-\rho_{\ell_i,\ell_j}
-=
+\rho_{\ell_i,\ell_j} =
 \mathrm{corr}(d_{\ell_i}, d_{\ell_j})
 $$
 
