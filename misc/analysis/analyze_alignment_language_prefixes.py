@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import math
 import os
 import random
 from pathlib import Path
@@ -29,7 +30,7 @@ DEFAULT_WIKI_COUNTS = UTILS_DIR / "wiki_counts.csv"
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Analyze AlignmentCondition as languages are added by Wikipedia count."
+        description="Analyze AlignmentCondition as languages are added by a chosen order."
     )
     parser.add_argument("--pair-csv", type=Path, default=DEFAULT_PAIR_CSV)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
@@ -61,8 +62,8 @@ def main() -> None:
     args.output_dir.mkdir(parents=True, exist_ok=True)
     write_csv(rows, args.output_dir / "alignment_language_prefix_scores.csv", prefix_fieldnames())
     write_csv(avg_rows, args.output_dir / "alignment_language_prefix_dataset_means.csv", mean_fieldnames())
-    plot_dataset_curves(rows, avg_rows, args.output_dir, args.formats)
-    plot_mean_curves(avg_rows, args.output_dir, args.formats)
+    plot_dataset_curves(rows, avg_rows, args.output_dir, args.formats, args.order)
+    plot_mean_curves(avg_rows, args.output_dir, args.formats, args.order)
 
     print(f"Wrote language-prefix analysis to {args.output_dir}")
 
@@ -195,11 +196,18 @@ def average_by_dataset(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     avg_rows = []
     for (dataset, group_size), subset in sorted(group_by(rows, "dataset", "group_size").items()):
         scores = [row["score"] for row in subset]
+        # Keep model-based CI bands in these prefix plots so mean curves show cross-model spread.
+        mean_score = sum(scores) / len(scores)
+        sample_std = sample_standard_deviation(scores, mean_score)
+        ci_half_width = 0.0 if len(scores) < 2 else 1.96 * sample_std / math.sqrt(len(scores))
         avg_rows.append({
             "dataset": dataset,
             "group_size": group_size,
             "num_models": len(scores),
-            "mean_score": sum(scores) / len(scores),
+            "mean_score": mean_score,
+            "score_std": sample_std,
+            "ci95_low": max(0.0, mean_score - ci_half_width),
+            "ci95_high": min(1.0, mean_score + ci_half_width),
             "min_score": min(scores),
             "max_score": max(scores),
         })
@@ -211,6 +219,7 @@ def plot_dataset_curves(
     avg_rows: list[dict[str, Any]],
     output_dir: Path,
     formats: list[str],
+    order: str,
 ) -> None:
     for dataset, subset in sorted(group_by(rows, "dataset").items()):
         fig, ax = plt.subplots(figsize=(8, 5))
@@ -228,15 +237,20 @@ def plot_dataset_curves(
             [row for row in avg_rows if row["dataset"] == dataset],
             key=lambda row: row["group_size"],
         )
+        x = [row["group_size"] for row in mean_rows]
+        mean = [row["mean_score"] for row in mean_rows]
+        ci_low = [row["ci95_low"] for row in mean_rows]
+        ci_high = [row["ci95_high"] for row in mean_rows]
+        ax.fill_between(x, ci_low, ci_high, color="black", alpha=0.12, linewidth=0)
         ax.plot(
-            [row["group_size"] for row in mean_rows],
-            [row["mean_score"] for row in mean_rows],
+            x,
+            mean,
             color="black",
             linewidth=2.6,
-            label="mean",
+            label="mean (95% CI)",
         )
         ax.set_title(f"AlignmentCondition by language-prefix size: {pretty(dataset)}")
-        ax.set_xlabel("Number of languages, sorted by Wikipedia article count")
+        ax.set_xlabel(f"Number of languages, {order_description(order)}")
         ax.set_ylabel("Score")
         ax.set_ylim(bottom=0)
         ax.legend(fontsize=8, ncols=2)
@@ -248,18 +262,24 @@ def plot_mean_curves(
     avg_rows: list[dict[str, Any]],
     output_dir: Path,
     formats: list[str],
+    order: str,
 ) -> None:
     fig, ax = plt.subplots(figsize=(8, 5))
     for dataset, dataset_rows in sorted(group_by(avg_rows, "dataset").items()):
         dataset_rows = sorted(dataset_rows, key=lambda row: row["group_size"])
-        ax.plot(
-            [row["group_size"] for row in dataset_rows],
-            [row["mean_score"] for row in dataset_rows],
-            linewidth=2,
-            label=pretty(dataset),
+        x = [row["group_size"] for row in dataset_rows]
+        mean = [row["mean_score"] for row in dataset_rows]
+        line = ax.plot(x, mean, linewidth=2, label=pretty(dataset))[0]
+        ax.fill_between(
+            x,
+            [row["ci95_low"] for row in dataset_rows],
+            [row["ci95_high"] for row in dataset_rows],
+            color=line.get_color(),
+            alpha=0.14,
+            linewidth=0,
         )
     ax.set_title("Mean AlignmentCondition by language-prefix size")
-    ax.set_xlabel("Number of languages, sorted by Wikipedia article count")
+    ax.set_xlabel(f"Number of languages, {order_description(order)}")
     ax.set_ylabel("Mean score across models")
     ax.set_ylim(bottom=0)
     ax.legend()
@@ -286,6 +306,13 @@ def score(num_success: int, num_pairs: int) -> float:
     return 0.0 if num_pairs == 0 else num_success / num_pairs
 
 
+def sample_standard_deviation(values: list[float], mean: float) -> float:
+    if len(values) < 2:
+        return 0.0
+    variance = sum((value - mean) ** 2 for value in values) / (len(values) - 1)
+    return math.sqrt(variance)
+
+
 def prefix_fieldnames() -> list[str]:
     return [
         "dataset",
@@ -301,7 +328,17 @@ def prefix_fieldnames() -> list[str]:
 
 
 def mean_fieldnames() -> list[str]:
-    return ["dataset", "group_size", "num_models", "mean_score", "min_score", "max_score"]
+    return [
+        "dataset",
+        "group_size",
+        "num_models",
+        "mean_score",
+        "score_std",
+        "ci95_low",
+        "ci95_high",
+        "min_score",
+        "max_score",
+    ]
 
 
 def group_by(rows: list[dict[str, Any]], *keys: str) -> dict[Any, list[dict[str, Any]]]:
@@ -316,6 +353,14 @@ def group_by(rows: list[dict[str, Any]], *keys: str) -> dict[Any, list[dict[str,
 
 def pretty(value: str) -> str:
     return value.replace("_", " ").replace("-", " ").title()
+
+
+def order_description(order: str) -> str:
+    if order == "wiki":
+        return "sorted by Wikipedia article count"
+    if order == "random":
+        return "in random order"
+    return f"ordered by {order}"
 
 
 if __name__ == "__main__":

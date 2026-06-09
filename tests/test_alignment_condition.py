@@ -145,6 +145,11 @@ def test_monolingual_structure_condition_matches_rotated_structure() -> None:
     assert result["distance"] == "cosine"
     assert result["num_concept_pairs"] == 6
     assert np.isclose(result["language_pairs"][0]["correlation"], 1.0)
+    assert np.isclose(result["mean_spearman"], 1.0)
+    assert np.isclose(result["mean_mae"], 0.0)
+    assert np.isclose(result["mean_rmse"], 0.0)
+    assert np.isclose(result["mean_centered_rmse"], 0.0)
+    assert np.isclose(result["mean_standardized_rmse"], 0.0)
 
 
 def test_monolingual_structure_condition_averages_language_pairs() -> None:
@@ -201,3 +206,8 @@ def test_monolingual_structure_condition_constant_distances_are_undefined() -> N
     assert result["score"] is None
     assert result["num_valid_language_pairs"] == 0
     assert result["language_pairs"][0]["correlation"] is None
+    assert result["language_pairs"][0]["spearman"] is None
+    assert result["language_pairs"][0]["standardized_rmse"] is None
+    assert np.isclose(result["language_pairs"][0]["mae"], 0.0)
+    assert np.isclose(result["language_pairs"][0]["rmse"], 0.0)
+    assert np.isclose(result["language_pairs"][0]["mean_distance_ratio"], 1.0)

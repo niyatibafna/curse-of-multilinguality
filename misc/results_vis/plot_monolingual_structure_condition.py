@@ -70,6 +70,7 @@ def load_results(input_dir: Path) -> tuple[list[dict[str, Any]], list[dict[str, 
             "num_concepts": int(result.get("num_concepts", payload.get("num_concepts", 0))),
             "num_concept_pairs": int(result.get("num_concept_pairs", 0)),
             "embedding_dim": int(payload.get("embedding_dim", 0)),
+            **summary_measures(result),
         }
         rows.append(row)
 
@@ -81,6 +82,7 @@ def load_results(input_dir: Path) -> tuple[list[dict[str, Any]], list[dict[str, 
                 "language_2": str(pair["language_2"]),
                 "correlation": optional_float(pair.get("correlation")),
                 "num_concept_pairs": int(pair.get("num_concept_pairs", 0)),
+                **pair_measures(pair),
             })
     return rows, pair_rows
 
@@ -179,6 +181,15 @@ def summary_fieldnames() -> list[str]:
         "num_concepts",
         "num_concept_pairs",
         "embedding_dim",
+        "mean_pearson",
+        "mean_spearman",
+        "mean_mae",
+        "mean_rmse",
+        "mean_normalized_rmse",
+        "mean_centered_rmse",
+        "mean_standardized_rmse",
+        "mean_mean_distance_ratio",
+        "mean_std_distance_ratio",
     ]
 
 
@@ -189,8 +200,53 @@ def pair_fieldnames() -> list[str]:
         "language_1",
         "language_2",
         "correlation",
+        "pearson",
+        "spearman",
+        "mae",
+        "rmse",
+        "normalized_rmse",
+        "centered_rmse",
+        "standardized_rmse",
+        "mean_distance_1",
+        "mean_distance_2",
+        "std_distance_1",
+        "std_distance_2",
+        "mean_distance_ratio",
+        "std_distance_ratio",
         "num_concept_pairs",
     ]
+
+
+def summary_measures(result: dict[str, Any]) -> dict[str, float | None]:
+    return {
+        "mean_pearson": optional_float(result.get("mean_pearson", result.get("score"))),
+        "mean_spearman": optional_float(result.get("mean_spearman")),
+        "mean_mae": optional_float(result.get("mean_mae")),
+        "mean_rmse": optional_float(result.get("mean_rmse")),
+        "mean_normalized_rmse": optional_float(result.get("mean_normalized_rmse")),
+        "mean_centered_rmse": optional_float(result.get("mean_centered_rmse")),
+        "mean_standardized_rmse": optional_float(result.get("mean_standardized_rmse")),
+        "mean_mean_distance_ratio": optional_float(result.get("mean_mean_distance_ratio")),
+        "mean_std_distance_ratio": optional_float(result.get("mean_std_distance_ratio")),
+    }
+
+
+def pair_measures(pair: dict[str, Any]) -> dict[str, float | None]:
+    return {
+        "pearson": optional_float(pair.get("pearson", pair.get("correlation"))),
+        "spearman": optional_float(pair.get("spearman")),
+        "mae": optional_float(pair.get("mae")),
+        "rmse": optional_float(pair.get("rmse")),
+        "normalized_rmse": optional_float(pair.get("normalized_rmse")),
+        "centered_rmse": optional_float(pair.get("centered_rmse")),
+        "standardized_rmse": optional_float(pair.get("standardized_rmse")),
+        "mean_distance_1": optional_float(pair.get("mean_distance_1")),
+        "mean_distance_2": optional_float(pair.get("mean_distance_2")),
+        "std_distance_1": optional_float(pair.get("std_distance_1")),
+        "std_distance_2": optional_float(pair.get("std_distance_2")),
+        "mean_distance_ratio": optional_float(pair.get("mean_distance_ratio")),
+        "std_distance_ratio": optional_float(pair.get("std_distance_ratio")),
+    }
 
 
 def add_value_labels(ax: plt.Axes) -> None:

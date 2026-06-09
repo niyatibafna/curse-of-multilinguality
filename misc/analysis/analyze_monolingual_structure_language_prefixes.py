@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import math
 import os
 import random
 from pathlib import Path
@@ -25,11 +26,22 @@ DEFAULT_PAIR_CSV = (
 DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parent / "outputs" / "monolingual_structure_language_prefixes"
 DEFAULT_LANGUAGE_TO_WIKI = UTILS_DIR / "language_to_wiki.csv"
 DEFAULT_WIKI_COUNTS = UTILS_DIR / "wiki_counts.csv"
+METRICS = [
+    ("correlation", "Pearson correlation", (0, 1)),
+    ("spearman", "Spearman correlation", (0, 1)),
+    ("mae", "MAE", (0, None)),
+    ("rmse", "RMSE", (0, None)),
+    ("normalized_rmse", "Normalized RMSE", (0, None)),
+    ("centered_rmse", "Centered RMSE", (0, None)),
+    ("standardized_rmse", "Standardized RMSE", (0, None)),
+    ("mean_distance_ratio", "Mean distance ratio", (0, None)),
+    ("std_distance_ratio", "Std distance ratio", (0, None)),
+]
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Analyze MonolingualStructureCondition as languages are added by Wikipedia count."
+        description="Analyze MonolingualStructureCondition as languages are added by a chosen order."
     )
     parser.add_argument("--pair-csv", type=Path, default=DEFAULT_PAIR_CSV)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
@@ -65,8 +77,9 @@ def main() -> None:
         args.output_dir / "monolingual_structure_language_prefix_dataset_means.csv",
         mean_fieldnames(),
     )
-    plot_dataset_curves(rows, avg_rows, args.output_dir, args.formats)
-    plot_mean_curves(avg_rows, args.output_dir, args.formats)
+    plot_dataset_curves(rows, avg_rows, args.output_dir, args.formats, args.order)
+    plot_mean_curves(avg_rows, args.output_dir, args.formats, args.order)
+    plot_additional_mean_curves(avg_rows, args.output_dir, args.formats, args.order)
 
     print(f"Wrote monolingual-structure language-prefix analysis to {args.output_dir}")
 
@@ -84,8 +97,11 @@ def read_pair_rows(path: Path) -> list[dict[str, Any]]:
                 "dataset": row["dataset"],
                 "language_1": row["language_1"],
                 "language_2": row["language_2"],
-                "correlation": correlation,
                 "num_concept_pairs": int(row["num_concept_pairs"]),
+                **{
+                    metric: optional_float(row.get(metric))
+                    for metric, _, _ in METRICS
+                },
             })
     return rows
 
@@ -145,25 +161,35 @@ def compute_prefix_scores(
             required_size = max(ranks[row["language_1"]], ranks[row["language_2"]])
             events.setdefault(required_size, []).append(row)
 
-        correlation_sum = 0.0
+        metric_sums = {metric: 0.0 for metric, _, _ in METRICS}
+        metric_counts = {metric: 0 for metric, _, _ in METRICS}
         num_language_pairs = 0
         event_size = 0
         for prefix_size in prefix_sizes:
             while event_size < prefix_size:
                 event_size += 1
                 for row in events.get(event_size, []):
-                    correlation_sum += row["correlation"]
+                    for metric, _, _ in METRICS:
+                        value = row[metric]
+                        if value is not None:
+                            metric_sums[metric] += value
+                            metric_counts[metric] += 1
                     num_language_pairs += 1
 
+            metric_scores = {
+                metric: score(metric_sums[metric], metric_counts[metric])
+                for metric, _, _ in METRICS
+            }
             rows.append({
                 "dataset": dataset,
                 "model": model,
                 "group_size": prefix_size,
                 "num_languages": len(languages),
                 "num_language_pairs": num_language_pairs,
-                "score": score(correlation_sum, num_language_pairs),
+                "score": metric_scores["correlation"],
                 "order": order,
                 "random_seed": random_seed if order == "random" else "",
+                **metric_scores,
             })
     return rows
 
@@ -203,14 +229,25 @@ def average_by_dataset(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         scores = [row["score"] for row in subset if row["score"] is not None]
         if not scores:
             continue
-        avg_rows.append({
+        # Keep model-based CI bands in these prefix plots so mean curves show cross-model spread.
+        row = {
             "dataset": dataset,
             "group_size": group_size,
             "num_models": len(scores),
-            "mean_score": sum(scores) / len(scores),
-            "min_score": min(scores),
-            "max_score": max(scores),
+        }
+        for metric, _, ylim in METRICS:
+            values = [item[metric] for item in subset if item[metric] is not None]
+            if values:
+                row.update(metric_summary_fields(metric, values, ylim))
+        row.update({
+            "mean_score": row["mean_correlation"],
+            "score_std": row["correlation_std"],
+            "ci95_low": row["correlation_ci95_low"],
+            "ci95_high": row["correlation_ci95_high"],
+            "min_score": row["min_correlation"],
+            "max_score": row["max_correlation"],
         })
+        avg_rows.append(row)
     return avg_rows
 
 
@@ -219,6 +256,7 @@ def plot_dataset_curves(
     avg_rows: list[dict[str, Any]],
     output_dir: Path,
     formats: list[str],
+    order: str,
 ) -> None:
     for dataset, subset in sorted(group_by(rows, "dataset").items()):
         fig, ax = plt.subplots(figsize=(8, 5))
@@ -239,19 +277,24 @@ def plot_dataset_curves(
             [row for row in avg_rows if row["dataset"] == dataset],
             key=lambda row: row["group_size"],
         )
+        x = [row["group_size"] for row in mean_rows]
+        mean = [row["mean_score"] for row in mean_rows]
+        ci_low = [row["ci95_low"] for row in mean_rows]
+        ci_high = [row["ci95_high"] for row in mean_rows]
+        ax.fill_between(x, ci_low, ci_high, color="black", alpha=0.12, linewidth=0)
         ax.plot(
-            [row["group_size"] for row in mean_rows],
-            [row["mean_score"] for row in mean_rows],
+            x,
+            mean,
             color="black",
             linewidth=2.6,
-            label="mean",
+            label="mean (95% CI)",
         )
         ax.axhline(0, color="#333333", linewidth=0.8)
         ax.set_title(f"MonolingualStructureCondition by language-prefix size: {pretty(dataset)}")
-        ax.set_xlabel("Number of languages, sorted by Wikipedia article count")
+        ax.set_xlabel(f"Number of languages, {order_description(order)}")
         ax.set_ylabel("Average correlation")
-        ax.set_ylim(-1, 1)
-        ax.legend(fontsize=8, ncols=2)
+        ax.set_ylim(0, 1)
+        ax.legend(fontsize=8, ncols=2, title=order_legend_title(order))
         fig.tight_layout()
         save_figure(fig, output_dir / f"{dataset}__monolingual_structure_by_language_prefix", formats)
 
@@ -260,24 +303,87 @@ def plot_mean_curves(
     avg_rows: list[dict[str, Any]],
     output_dir: Path,
     formats: list[str],
+    order: str,
 ) -> None:
     fig, ax = plt.subplots(figsize=(8, 5))
     for dataset, dataset_rows in sorted(group_by(avg_rows, "dataset").items()):
         dataset_rows = sorted(dataset_rows, key=lambda row: row["group_size"])
-        ax.plot(
-            [row["group_size"] for row in dataset_rows],
-            [row["mean_score"] for row in dataset_rows],
-            linewidth=2,
-            label=pretty(dataset),
+        x = [row["group_size"] for row in dataset_rows]
+        mean = [row["mean_score"] for row in dataset_rows]
+        line = ax.plot(x, mean, linewidth=2, label=pretty(dataset))[0]
+        ax.fill_between(
+            x,
+            [row["ci95_low"] for row in dataset_rows],
+            [row["ci95_high"] for row in dataset_rows],
+            color=line.get_color(),
+            alpha=0.14,
+            linewidth=0,
         )
     ax.axhline(0, color="#333333", linewidth=0.8)
     ax.set_title("Mean MonolingualStructureCondition by language-prefix size")
-    ax.set_xlabel("Number of languages, sorted by Wikipedia article count")
+    ax.set_xlabel(f"Number of languages, {order_description(order)}")
     ax.set_ylabel("Mean correlation across models")
-    ax.set_ylim(-1, 1)
-    ax.legend()
+    ax.set_ylim(0, 1)
+    ax.legend(title=order_legend_title(order))
     fig.tight_layout()
     save_figure(fig, output_dir / "all_datasets__mean_monolingual_structure_by_language_prefix", formats)
+
+
+def plot_additional_mean_curves(
+    avg_rows: list[dict[str, Any]],
+    output_dir: Path,
+    formats: list[str],
+    order: str,
+) -> None:
+    for metric, label, ylim in METRICS:
+        if metric == "correlation":
+            continue
+        plot_metric_mean_curves(avg_rows, output_dir, formats, order, metric, label, ylim)
+
+
+def plot_metric_mean_curves(
+    avg_rows: list[dict[str, Any]],
+    output_dir: Path,
+    formats: list[str],
+    order: str,
+    metric: str,
+    label: str,
+    ylim: tuple[float | None, float | None],
+) -> None:
+    fig, ax = plt.subplots(figsize=(8, 5))
+    for dataset, dataset_rows in sorted(group_by(avg_rows, "dataset").items()):
+        dataset_rows = sorted(
+            [row for row in dataset_rows if f"mean_{metric}" in row],
+            key=lambda row: row["group_size"],
+        )
+        if not dataset_rows:
+            continue
+        x = [row["group_size"] for row in dataset_rows]
+        line = ax.plot(
+            x,
+            [row[f"mean_{metric}"] for row in dataset_rows],
+            linewidth=2,
+            label=pretty(dataset),
+        )[0]
+        ax.fill_between(
+            x,
+            [row[f"{metric}_ci95_low"] for row in dataset_rows],
+            [row[f"{metric}_ci95_high"] for row in dataset_rows],
+            color=line.get_color(),
+            alpha=0.14,
+            linewidth=0,
+        )
+    ax.set_title(f"Mean {label} by language-prefix size")
+    ax.set_xlabel(f"Number of languages, {order_description(order)}")
+    ax.set_ylabel(f"Mean {label} across models")
+    ax.set_ylim(*ylim)
+    ax.legend(title=order_legend_title(order))
+    fig.tight_layout()
+    save_figure(
+        fig,
+        output_dir / f"all_datasets__mean_monolingual_structure_by_language_prefix__{metric}",
+        formats,
+    )
 
 
 def write_csv(rows: list[dict[str, Any]], path: Path, fieldnames: list[str]) -> None:
@@ -307,6 +413,38 @@ def score(correlation_sum: float, num_language_pairs: int) -> float | None:
     return correlation_sum / num_language_pairs
 
 
+def sample_standard_deviation(values: list[float], mean: float) -> float:
+    if len(values) < 2:
+        return 0.0
+    variance = sum((value - mean) ** 2 for value in values) / (len(values) - 1)
+    return math.sqrt(variance)
+
+
+def metric_summary_fields(
+    metric: str,
+    values: list[float],
+    ylim: tuple[float | None, float | None],
+) -> dict[str, float]:
+    mean = sum(values) / len(values)
+    sample_std = sample_standard_deviation(values, mean)
+    ci_half_width = 0.0 if len(values) < 2 else 1.96 * sample_std / math.sqrt(len(values))
+    lower, upper = ylim
+    ci_low = mean - ci_half_width
+    ci_high = mean + ci_half_width
+    if lower is not None:
+        ci_low = max(lower, ci_low)
+    if upper is not None:
+        ci_high = min(upper, ci_high)
+    return {
+        f"mean_{metric}": mean,
+        f"{metric}_std": sample_std,
+        f"{metric}_ci95_low": ci_low,
+        f"{metric}_ci95_high": ci_high,
+        f"min_{metric}": min(values),
+        f"max_{metric}": max(values),
+    }
+
+
 def prefix_fieldnames() -> list[str]:
     return [
         "dataset",
@@ -315,13 +453,36 @@ def prefix_fieldnames() -> list[str]:
         "num_languages",
         "num_language_pairs",
         "score",
+        *[metric for metric, _, _ in METRICS],
         "order",
         "random_seed",
     ]
 
 
 def mean_fieldnames() -> list[str]:
-    return ["dataset", "group_size", "num_models", "mean_score", "min_score", "max_score"]
+    return [
+        "dataset",
+        "group_size",
+        "num_models",
+        "mean_score",
+        "score_std",
+        "ci95_low",
+        "ci95_high",
+        "min_score",
+        "max_score",
+        *[
+            field
+            for metric, _, _ in METRICS
+            for field in [
+                f"mean_{metric}",
+                f"{metric}_std",
+                f"{metric}_ci95_low",
+                f"{metric}_ci95_high",
+                f"min_{metric}",
+                f"max_{metric}",
+            ]
+        ],
+    ]
 
 
 def group_by(rows: list[dict[str, Any]], *keys: str) -> dict[Any, list[dict[str, Any]]]:
@@ -336,6 +497,22 @@ def group_by(rows: list[dict[str, Any]], *keys: str) -> dict[Any, list[dict[str,
 
 def pretty(value: str) -> str:
     return value.replace("_", " ").replace("-", " ").title()
+
+
+def order_description(order: str) -> str:
+    if order == "wiki":
+        return "ordered high to low resource"
+    if order == "random":
+        return "in random order"
+    return f"ordered by {order}"
+
+
+def order_legend_title(order: str) -> str:
+    if order == "wiki":
+        return "Order: high to low resource"
+    if order == "random":
+        return "Order: random"
+    return f"Order: {order}"
 
 
 if __name__ == "__main__":

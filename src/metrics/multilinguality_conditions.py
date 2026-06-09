@@ -181,35 +181,51 @@ class MonolingualStructureCondition(COMMetric):
             self._cosine_distance_pairs(array)
             for array in arrays
         ]
+        distance_stats = [
+            self._distance_vector_stats(vector)
+            for vector in distance_vectors
+        ]
 
         pair_rows = []
-        correlations = []
+        measure_values: dict[str, list[float]] = {
+            "pearson": [],
+            "spearman": [],
+            "mae": [],
+            "rmse": [],
+            "normalized_rmse": [],
+            "centered_rmse": [],
+            "standardized_rmse": [],
+            "mean_distance_ratio": [],
+            "std_distance_ratio": [],
+        }
         num_concept_pairs = len(distance_vectors[0])
         for i, language_1 in enumerate(languages):
             for j in range(i + 1, self.num_languages):
                 language_2 = languages[j]
-                correlation = self._pearson_correlation(
-                    distance_vectors[i],
-                    distance_vectors[j],
-                )
-                if correlation is not None:
-                    correlations.append(correlation)
+                measures = self._distance_vector_measures(distance_stats[i], distance_stats[j])
+                for name, value in measures.items():
+                    if value is not None and name in measure_values:
+                        measure_values[name].append(value)
                 pair_rows.append({
                     "language_1": language_1,
                     "language_2": language_2,
-                    "correlation": correlation,
                     "num_concept_pairs": num_concept_pairs,
+                    **measures,
                 })
 
-        score = float(np.mean(correlations)) if correlations else None
+        mean_measures = {
+            f"mean_{name}": float(np.mean(values)) if values else None
+            for name, values in measure_values.items()
+        }
         return {
-            "score": score,
+            "score": mean_measures["mean_pearson"],
             "distance": "cosine",
             "correlation": "pearson",
             "num_languages": self.num_languages,
             "num_concepts": self.num_concepts,
             "num_concept_pairs": num_concept_pairs,
-            "num_valid_language_pairs": len(correlations),
+            "num_valid_language_pairs": len(measure_values["pearson"]),
+            **mean_measures,
             "languages": languages,
             "language_pairs": pair_rows,
         }
@@ -241,10 +257,96 @@ class MonolingualStructureCondition(COMMetric):
         norms = np.linalg.norm(arr, axis=1, keepdims=True)
         return arr / np.clip(norms, a_min=np.finfo(float).eps, a_max=None)
 
+    def _distance_vector_stats(self, distances: np.ndarray) -> dict[str, Any]:
+        mean = float(np.mean(distances))
+        std = float(np.std(distances))
+        centered = distances - mean
+        return {
+            "distances": distances,
+            "mean": mean,
+            "std": std,
+            "centered": centered,
+            "standardized": self._standardize(distances, mean, std),
+            "ranks": self._rankdata(distances),
+        }
+
+    def _distance_vector_measures(
+        self,
+        x_stats: dict[str, Any],
+        y_stats: dict[str, Any],
+    ) -> dict[str, float | None]:
+        x = x_stats["distances"]
+        y = y_stats["distances"]
+        x_mean = x_stats["mean"]
+        y_mean = y_stats["mean"]
+        x_std = x_stats["std"]
+        y_std = y_stats["std"]
+        diff = x - y
+
+        return {
+            "correlation": self._centered_cosine(x_stats["centered"], y_stats["centered"]),
+            "pearson": self._centered_cosine(x_stats["centered"], y_stats["centered"]),
+            "spearman": self._pearson_correlation(x_stats["ranks"], y_stats["ranks"]),
+            "mae": float(np.mean(np.abs(diff))),
+            "rmse": float(np.sqrt(np.mean(diff ** 2))),
+            "normalized_rmse": self._safe_ratio(
+                float(np.sqrt(np.mean(diff ** 2))),
+                0.5 * (x_mean + y_mean),
+            ),
+            "centered_rmse": float(
+                np.sqrt(np.mean((x_stats["centered"] - y_stats["centered"]) ** 2))
+            ),
+            "standardized_rmse": self._rmse_or_none(
+                x_stats["standardized"],
+                y_stats["standardized"],
+            ),
+            "mean_distance_1": x_mean,
+            "mean_distance_2": y_mean,
+            "std_distance_1": x_std,
+            "std_distance_2": y_std,
+            "mean_distance_ratio": self._safe_ratio(y_mean, x_mean),
+            "std_distance_ratio": self._safe_ratio(y_std, x_std),
+        }
+
     def _pearson_correlation(self, x: np.ndarray, y: np.ndarray) -> float | None:
         x_centered = x - np.mean(x)
         y_centered = y - np.mean(y)
+        return self._centered_cosine(x_centered, y_centered)
+
+    def _centered_cosine(self, x_centered: np.ndarray, y_centered: np.ndarray) -> float | None:
         denom = np.linalg.norm(x_centered) * np.linalg.norm(y_centered)
         if denom == 0.0:
             return None
         return float(np.dot(x_centered, y_centered) / denom)
+
+    def _spearman_correlation(self, x: np.ndarray, y: np.ndarray) -> float | None:
+        return self._pearson_correlation(self._rankdata(x), self._rankdata(y))
+
+    def _rankdata(self, values: np.ndarray) -> np.ndarray:
+        values = np.round(values, decimals=12)
+        order = np.argsort(values, kind="mergesort")
+        ranks = np.empty(len(values), dtype=float)
+        sorted_values = values[order]
+        start = 0
+        while start < len(values):
+            end = start + 1
+            while end < len(values) and sorted_values[end] == sorted_values[start]:
+                end += 1
+            ranks[order[start:end]] = 0.5 * (start + end - 1) + 1.0
+            start = end
+        return ranks
+
+    def _standardize(self, values: np.ndarray, mean: float, std: float) -> np.ndarray | None:
+        if std <= np.finfo(float).eps:
+            return None
+        return (values - mean) / std
+
+    def _rmse_or_none(self, x: np.ndarray | None, y: np.ndarray | None) -> float | None:
+        if x is None or y is None:
+            return None
+        return float(np.sqrt(np.mean((x - y) ** 2)))
+
+    def _safe_ratio(self, numerator: float, denominator: float) -> float | None:
+        if abs(denominator) <= np.finfo(float).eps:
+            return None
+        return numerator / denominator
