@@ -147,7 +147,7 @@ We will start with monolingual BERT.
 We will get data from MADLAD400. 
 
 ### Languages
-We choose 100 languages from the dataset, not including English. We'll then start with a random subset, and then add more languages to it to create incrementally bigger language subsets.
+We choose 100 languages from the dataset. We'll then start with a random subset, and then add more languages to it to create incrementally bigger language subsets.
 
 ### Data sampling strategies
 #### Fixed token budget
