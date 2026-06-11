@@ -64,6 +64,8 @@ def main(
     datasets: str | list[str],
     metrics: str | list[str],
     model_type: str | None = None,
+    model_aliases: str | list[str] | None = None,
+    dataset_splits: str | list[str] | None = None,
     output_dir: str | Path = "outputs",
     dataset_languages: str | list[str] | None = None,
     eval_languages: str | list[str] | None = None,
@@ -81,7 +83,9 @@ def main(
     alignment_batch_size: int = 64,
 ) -> None:
     models = as_list(models)
+    model_aliases = as_list(model_aliases)
     datasets = as_list(datasets)
+    dataset_splits = as_list(dataset_splits)
     metrics = as_list(metrics)
     dataset_languages = as_list(dataset_languages)
     eval_languages = as_list(eval_languages)
@@ -92,15 +96,26 @@ def main(
         validate_choices("models", models, MODEL_REGISTRY)
     else:
         validate_choices("model_type", [model_type], MODEL_REGISTRY)
+    if model_aliases is not None and len(model_aliases) != len(models):
+        raise ValueError("--model_aliases must have the same length as --models.")
+    if dataset_splits is not None and len(dataset_splits) != len(datasets):
+        raise ValueError("--dataset_splits must have the same length as --datasets.")
     validate_choices("metrics", metrics, METRICS)
 
-    for dataset_name in datasets:
+    for dataset_index, dataset_name in enumerate(datasets):
+        requested_split = dataset_splits[dataset_index] if dataset_splits else None
         log(f"loading dataset={dataset_name}")
-        texts, dataset_split = load_texts(dataset_name, dataset_languages)
-        languages = select_languages(texts, eval_languages)
+        texts, dataset_split = load_texts(dataset_name, dataset_languages, requested_split)
+        languages = select_languages(texts, eval_languages or dataset_languages)
+        texts = filter_texts_for_languages(texts, languages)
         log(f"loaded {len(texts)} texts with {len(languages)} languages: {', '.join(languages)}")
 
-        for model_name in models:
+        for model_index, model_name in enumerate(models):
+            output_model_name = (
+                model_aliases[model_index]
+                if model_aliases is not None
+                else model_name
+            )
             model_key = model_type or model_name
             model_pooling = resolve_pooling(model_key, pooling)
             model_kwargs = {"layer": layer, "device": device}
@@ -177,12 +192,13 @@ def main(
                     normalize,
                     **extra_metric_kwargs,
                 )
-                output_path = output_file(output_dir, model_name, dataset_name, metric_name)
+                output_path = output_file(output_dir, output_model_name, dataset_name, metric_name)
                 output_path.parent.mkdir(parents=True, exist_ok=True)
                 write_json(
                     output_path,
                     {
-                        "model": model_name,
+                        "model": output_model_name,
+                        "model_path": model_name,
                         "model_type": model_key,
                         "dataset": dataset_name,
                         "metric": metric_name,
@@ -200,9 +216,13 @@ def main(
 def load_texts(
     dataset_name: str,
     dataset_languages: list[str] | None,
+    split: str | None = None,
 ) -> tuple[list[dict[str, Any]], str]:
-    dataset = load_dataset(dataset_name, languages=dataset_languages)
-    cache_path = formatted_cache_path(dataset_name, dataset.split, dataset_languages)
+    kwargs = {"languages": None}
+    if split is not None:
+        kwargs["split"] = split
+    dataset = load_dataset(dataset_name, **kwargs)
+    cache_path = formatted_cache_path(dataset_name, dataset.split)
     texts = read_jsonl(cache_path)
     if texts is None:
         lock_path = cache_path.with_suffix(cache_path.suffix + ".lock")
@@ -236,7 +256,8 @@ def load_texts(
 
 def select_languages(texts: list[dict[str, Any]], requested: list[str] | None) -> list[str]:
     if requested:
-        languages = requested
+        available = set().union(*(set(text["data"]) for text in texts))
+        languages = [language for language in requested if language in available]
     else:
         languages = sorted(set.intersection(*(set(text["data"]) for text in texts)))
 
@@ -251,9 +272,32 @@ def select_languages(texts: list[dict[str, Any]], requested: list[str] | None) -
     ]
     if missing:
         preview = ", ".join(f"{row_id}:{language}" for row_id, language in missing[:5])
-        raise ValueError(f"Requested languages are missing in some texts: {preview}")
+        available_rows = filter_texts_for_languages(texts, languages)
+        if not available_rows:
+            raise ValueError(f"Requested languages are missing in all texts: {preview}")
 
     return languages
+
+
+def filter_texts_for_languages(
+    texts: list[dict[str, Any]],
+    languages: list[str],
+) -> list[dict[str, Any]]:
+    filtered = [
+        {
+            "id": text["id"],
+            "data": {language: text["data"][language] for language in languages},
+            "metadata": text.get("metadata", {}),
+        }
+        for text in texts
+        if all(language in text["data"] for language in languages)
+    ]
+    if not filtered:
+        raise ValueError(
+            "No dataset rows contain all requested languages: "
+            f"{', '.join(languages)}"
+        )
+    return filtered
 
 
 def embed_texts(
@@ -343,10 +387,8 @@ def slugify(value: str) -> str:
 def formatted_cache_path(
     dataset_name: str,
     split: str,
-    dataset_languages: list[str] | None,
 ) -> Path:
-    languages = "all" if dataset_languages is None else "-".join(sorted(dataset_languages))
-    name = "__".join([slugify(dataset_name), slugify(split), slugify(languages)])
+    name = "__".join([slugify(dataset_name), slugify(split), "all"])
     return project_datadir() / "multiparallel" / f"{name}.jsonl"
 
 

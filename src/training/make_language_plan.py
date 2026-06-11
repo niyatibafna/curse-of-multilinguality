@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Any
+import re
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -29,6 +29,8 @@ def main(
     exclude_languages: str = "",
     prioritize_eval_coverage: bool = True,
     eval_datasets: str = ",".join(EVAL_DATASETS),
+    order_by_madlad_resource: bool = False,
+    resource_split: str = "clean",
     num_languages: int = 100,
     sizes: str | None = None,
     seed: int = 13,
@@ -58,9 +60,14 @@ def main(
         if prioritize_eval_coverage:
             eval_coverage = madlad_eval_coverage(configs, as_list(eval_datasets) or [])
             candidates = sort_by_eval_coverage(candidates, eval_coverage)
+        resource_scores = {}
+        if order_by_madlad_resource:
+            resource_scores = madlad_resource_scores(dataset_name, resource_split)
+            candidates = sort_by_resource(candidates, resource_scores, eval_coverage)
         selected = included + candidates[: num_languages - len(included)]
     else:
         eval_coverage = {}
+        resource_scores = {}
         selected = [language for language in selected if language not in excluded][:num_languages]
 
     if len(selected) < num_languages:
@@ -78,6 +85,11 @@ def main(
         "subsets": nested_subsets(selected, group_sizes),
         "eval_coverage": {
             language: eval_coverage.get(language, {})
+            for language in selected
+        },
+        "resource_split": resource_split,
+        "resource_scores": {
+            language: resource_scores.get(language, 0)
             for language in selected
         },
     }
@@ -142,6 +154,40 @@ def sort_by_eval_coverage(
     return sorted(
         languages,
         key=lambda language: (
+            -len(coverage.get(language, {})),
+            -sum(len(matches) for matches in coverage.get(language, {}).values()),
+            language,
+        ),
+    )
+
+
+def madlad_resource_scores(dataset_name: str, split: str) -> dict[str, int]:
+    try:
+        from huggingface_hub import HfApi
+    except ImportError as exc:
+        raise ImportError("Install `huggingface_hub` to rank MADLAD languages by resource.") from exc
+
+    info = HfApi().dataset_info(dataset_name)
+    pattern = re.compile(rf"^data-v1p5/([^/]+)/{re.escape(split)}_docs.*\.jsonl\.gz$")
+    scores: dict[str, int] = {}
+    for sibling in info.siblings:
+        match = pattern.match(sibling.rfilename)
+        if match:
+            language = match.group(1)
+            scores[language] = scores.get(language, 0) + 1
+    return scores
+
+
+def sort_by_resource(
+    languages: list[str],
+    resource_scores: dict[str, int],
+    coverage: dict[str, dict[str, list[str]]],
+) -> list[str]:
+    return sorted(
+        languages,
+        key=lambda language: (
+            language not in coverage,
+            -resource_scores.get(language, 0),
             -len(coverage.get(language, {})),
             -sum(len(matches) for matches in coverage.get(language, {}).values()),
             language,
@@ -237,6 +283,8 @@ if __name__ == "__main__":
     parser.add_argument("--exclude_languages", default="")
     parser.add_argument("--prioritize_eval_coverage", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--eval_datasets", default=",".join(EVAL_DATASETS))
+    parser.add_argument("--order_by_madlad_resource", action=argparse.BooleanOptionalAction, default=False)
+    parser.add_argument("--resource_split", default="clean")
     parser.add_argument("--num_languages", type=int, default=100)
     parser.add_argument("--sizes")
     parser.add_argument("--seed", type=int, default=13)

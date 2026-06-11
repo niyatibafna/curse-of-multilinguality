@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -32,6 +33,7 @@ def main(
             BertForMaskedLM,
             DataCollatorForLanguageModeling,
             Trainer,
+            TrainerCallback,
             TrainingArguments,
         )
     except ImportError as exc:
@@ -61,6 +63,7 @@ def main(
         num_proc=preprocessing_num_workers,
         desc=f"grouping into {max_seq_length}-token chunks",
     )
+    grouped = grouped.shuffle(seed=seed)
 
     config = BertConfig(
         vocab_size=len(tokenizer),
@@ -86,9 +89,16 @@ def main(
         report_to="none",
         save_total_limit=2,
     )
-    trainer = Trainer(model=model, args=args, data_collator=collator, train_dataset=grouped)
+    trainer = Trainer(
+        model=model,
+        args=args,
+        data_collator=collator,
+        train_dataset=grouped,
+        callbacks=[make_jsonl_loss_logger(output / "training_loss.jsonl", TrainerCallback)],
+    )
     trainer.train()
     trainer.save_model(output)
+    trainer.save_state()
     tokenizer.save_pretrained(output)
     print(output)
 
@@ -100,6 +110,26 @@ def group_texts(batch: dict[str, list[list[int]]], block_size: int) -> dict[str,
         key: [values[index : index + block_size] for index in range(0, total_length, block_size)]
         for key, values in concatenated.items()
     }
+
+
+def make_jsonl_loss_logger(path: Path, callback_cls: type):
+    class JsonlLossLogger(callback_cls):
+        def on_log(self, args, state, control, logs=None, **kwargs):
+            if not logs or "loss" not in logs:
+                return
+            path.parent.mkdir(parents=True, exist_ok=True)
+            record = {
+                "step": state.global_step,
+                "epoch": state.epoch,
+                "loss": logs.get("loss"),
+                "learning_rate": logs.get("learning_rate"),
+                "grad_norm": logs.get("grad_norm"),
+            }
+            with path.open("a") as handle:
+                json.dump(record, handle, sort_keys=True)
+                handle.write("\n")
+
+    return JsonlLossLogger()
 
 
 if __name__ == "__main__":

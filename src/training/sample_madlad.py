@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 from typing import Any
+import hashlib
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -24,6 +25,8 @@ def main(
     additive_tokens_per_language: int = 1_000_000,
     tokenizer_path: str | None = None,
     allow_underfilled: bool = True,
+    shuffle_output: bool = False,
+    sample_shuffle_buffer_size: int = 0,
     seed: int = 13,
 ) -> None:
     try:
@@ -54,6 +57,7 @@ def main(
         "languages": languages,
         "target_tokens_per_language": target_per_language,
         "seed": seed,
+        "sample_shuffle_buffer_size": sample_shuffle_buffer_size,
         "files": {"jsonl": str(output), "txt": str(output.with_suffix(".txt"))},
         "per_language": {},
     }
@@ -68,6 +72,8 @@ def main(
                 split=split,
                 config_per_language=config_per_language,
                 trust_remote_code=trust_remote_code,
+                shuffle_buffer_size=sample_shuffle_buffer_size,
+                seed=language_seed(seed, language),
             )
             for row in stream:
                 text = str(row[text_field]).strip()
@@ -97,6 +103,8 @@ def main(
             }
 
     write_json(output.with_suffix(".manifest.json"), manifest)
+    if shuffle_output:
+        shuffle_jsonl(output, seed)
     print(output)
 
 
@@ -116,16 +124,25 @@ def load_language_stream(
     split: str,
     config_per_language: bool,
     trust_remote_code: bool,
+    shuffle_buffer_size: int = 0,
+    seed: int = 13,
 ):
     from datasets import load_dataset
 
     if config_per_language:
-        return iter(load_dataset(dataset_name, language, split=split, streaming=True, trust_remote_code=trust_remote_code))
-    return iter(
-        load_dataset(dataset_name, split=split, streaming=True, trust_remote_code=trust_remote_code).filter(
+        dataset = load_dataset(dataset_name, language, split=split, streaming=True, trust_remote_code=trust_remote_code)
+    else:
+        dataset = load_dataset(dataset_name, split=split, streaming=True, trust_remote_code=trust_remote_code).filter(
             lambda row: row["language"] == language
         )
-    )
+    if shuffle_buffer_size > 0:
+        dataset = dataset.shuffle(seed=seed, buffer_size=shuffle_buffer_size)
+    return iter(dataset)
+
+
+def language_seed(seed: int, language: str) -> int:
+    digest = hashlib.blake2b(f"{seed}:{language}".encode("utf-8"), digest_size=4).digest()
+    return int.from_bytes(digest, "little")
 
 
 def default_output(strategy: str, subset: str) -> Path:
@@ -136,6 +153,20 @@ def to_jsonl(row: dict[str, Any]) -> str:
     import json
 
     return json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n"
+
+
+def shuffle_jsonl(path: Path, seed: int) -> None:
+    from datasets import load_dataset
+
+    dataset = load_dataset("json", data_files=str(path), split="train").shuffle(seed=seed)
+    tmp_jsonl = path.with_suffix(path.suffix + ".shuffle_tmp")
+    tmp_txt = path.with_suffix(".txt.shuffle_tmp")
+    with tmp_jsonl.open("w") as jsonl_handle, tmp_txt.open("w") as txt_handle:
+        for row in dataset:
+            jsonl_handle.write(to_jsonl({"language": row["language"], "text": row["text"]}))
+            txt_handle.write(str(row["text"]).replace("\n", " ") + "\n")
+    tmp_jsonl.replace(path)
+    tmp_txt.replace(path.with_suffix(".txt"))
 
 
 if __name__ == "__main__":
@@ -155,5 +186,7 @@ if __name__ == "__main__":
     parser.add_argument("--additive_tokens_per_language", type=int, default=1_000_000)
     parser.add_argument("--tokenizer_path")
     parser.add_argument("--allow_underfilled", type=str_to_bool, default=True)
+    parser.add_argument("--shuffle_output", type=str_to_bool, default=False)
+    parser.add_argument("--sample_shuffle_buffer_size", type=int, default=0)
     parser.add_argument("--seed", type=int, default=13)
     main(**vars(parser.parse_args()))
