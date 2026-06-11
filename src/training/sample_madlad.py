@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from typing import Any
 import hashlib
+import random
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -27,6 +29,8 @@ def main(
     allow_underfilled: bool = True,
     shuffle_output: bool = False,
     sample_shuffle_buffer_size: int = 0,
+    madlad_cache_root: str | None = None,
+    cache_fallback_to_hf: bool = True,
     seed: int = 13,
 ) -> None:
     try:
@@ -58,6 +62,8 @@ def main(
         "target_tokens_per_language": target_per_language,
         "seed": seed,
         "sample_shuffle_buffer_size": sample_shuffle_buffer_size,
+        "madlad_cache_root": madlad_cache_root,
+        "cache_fallback_to_hf": cache_fallback_to_hf,
         "files": {"jsonl": str(output), "txt": str(output.with_suffix(".txt"))},
         "per_language": {},
     }
@@ -66,25 +72,58 @@ def main(
         for language in languages:
             token_count = 0
             rows = 0
-            stream = load_language_stream(
+            stream, source, cache_rows = load_sample_stream(
+                cache_root=madlad_cache_root,
                 dataset_name=dataset,
                 language=language,
                 split=split,
+                text_field=text_field,
                 config_per_language=config_per_language,
                 trust_remote_code=trust_remote_code,
                 shuffle_buffer_size=sample_shuffle_buffer_size,
                 seed=language_seed(seed, language),
             )
-            for row in stream:
-                text = str(row[text_field]).strip()
-                if not text:
-                    continue
-                token_count += count_tokens(text, tokenizer)
-                jsonl_handle.write(to_jsonl({"language": language, "text": text}))
-                txt_handle.write(text.replace("\n", " ") + "\n")
-                rows += 1
-                if token_count >= target_per_language:
-                    break
+            token_count, rows, reached_target = write_until_target(
+                stream=stream,
+                language=language,
+                text_field=text_field,
+                tokenizer=tokenizer,
+                target_tokens=target_per_language,
+                jsonl_handle=jsonl_handle,
+                txt_handle=txt_handle,
+                token_count=token_count,
+                rows=rows,
+            )
+            source_used = source
+            if not reached_target and source == "cache" and cache_fallback_to_hf:
+                print(
+                    f"WARNING: {language} cache ended at {token_count} tokens before "
+                    f"target {target_per_language}; falling back to HF.",
+                    flush=True,
+                )
+                hf_stream = load_language_stream(
+                    dataset_name=dataset,
+                    language=language,
+                    split=split,
+                    config_per_language=config_per_language,
+                    trust_remote_code=trust_remote_code,
+                    shuffle_buffer_size=0 if sample_shuffle_buffer_size == 0 else sample_shuffle_buffer_size,
+                    seed=language_seed(seed, language),
+                )
+                if sample_shuffle_buffer_size == 0 and cache_rows:
+                    hf_stream = skip_rows(hf_stream, cache_rows)
+                token_count, rows, reached_target = write_until_target(
+                    stream=hf_stream,
+                    language=language,
+                    text_field=text_field,
+                    tokenizer=tokenizer,
+                    target_tokens=target_per_language,
+                    jsonl_handle=jsonl_handle,
+                    txt_handle=txt_handle,
+                    token_count=token_count,
+                    rows=rows,
+                )
+                source_used = "cache+hf"
             if token_count < target_per_language and not allow_underfilled:
                 raise RuntimeError(
                     f"{language} ended at {token_count} tokens before target {target_per_language}."
@@ -100,6 +139,7 @@ def main(
                 "tokens": token_count,
                 "target_tokens": target_per_language,
                 "underfilled": token_count < target_per_language,
+                "source": source_used,
             }
 
     write_json(output.with_suffix(".manifest.json"), manifest)
@@ -138,6 +178,116 @@ def load_language_stream(
     if shuffle_buffer_size > 0:
         dataset = dataset.shuffle(seed=seed, buffer_size=shuffle_buffer_size)
     return iter(dataset)
+
+
+def load_sample_stream(
+    cache_root: str | None,
+    dataset_name: str,
+    language: str,
+    split: str,
+    text_field: str,
+    config_per_language: bool,
+    trust_remote_code: bool,
+    shuffle_buffer_size: int,
+    seed: int,
+) -> tuple[Any, str, int]:
+    if cache_root:
+        cache_path = cache_language_path(Path(cache_root), split, language)
+        if cache_path.exists():
+            rows = cache_num_rows(cache_path)
+            stream = load_cached_language_stream(cache_path, shuffle_buffer_size, seed)
+            return stream, "cache", rows
+        print(f"WARNING: cache missing for {language}: {cache_path}; falling back to HF.", flush=True)
+    return (
+        load_language_stream(
+            dataset_name=dataset_name,
+            language=language,
+            split=split,
+            config_per_language=config_per_language,
+            trust_remote_code=trust_remote_code,
+            shuffle_buffer_size=shuffle_buffer_size,
+            seed=seed,
+        ),
+        "hf",
+        0,
+    )
+
+
+def cache_language_path(cache_root: Path, split: str, language: str) -> Path:
+    return cache_root / split / f"{language}.jsonl"
+
+
+def cache_manifest_path(cache_root: Path, split: str, language: str) -> Path:
+    return cache_root / split / f"{language}.manifest.json"
+
+
+def cache_num_rows(cache_path: Path) -> int:
+    manifest = cache_path.with_suffix(".manifest.json")
+    if not manifest.exists():
+        return 0
+    try:
+        payload = json.loads(manifest.read_text())
+    except json.JSONDecodeError:
+        return 0
+    return int(payload.get("rows", 0))
+
+
+def load_cached_language_stream(path: Path, shuffle_buffer_size: int, seed: int):
+    rows = iter_cached_rows(path)
+    if shuffle_buffer_size > 0:
+        rows = buffer_shuffle(rows, shuffle_buffer_size, seed)
+    return rows
+
+
+def iter_cached_rows(path: Path):
+    with path.open() as handle:
+        for line in handle:
+            if line.strip():
+                yield json.loads(line)
+
+
+def buffer_shuffle(rows, buffer_size: int, seed: int):
+    rng = random.Random(seed)
+    buffer = []
+    for row in rows:
+        if len(buffer) < buffer_size:
+            buffer.append(row)
+            continue
+        index = rng.randrange(len(buffer))
+        yield buffer[index]
+        buffer[index] = row
+    rng.shuffle(buffer)
+    yield from buffer
+
+
+def skip_rows(rows, num_rows: int):
+    for index, row in enumerate(rows):
+        if index >= num_rows:
+            yield row
+
+
+def write_until_target(
+    stream,
+    language: str,
+    text_field: str,
+    tokenizer: Any | None,
+    target_tokens: int,
+    jsonl_handle,
+    txt_handle,
+    token_count: int = 0,
+    rows: int = 0,
+) -> tuple[int, int, bool]:
+    for row in stream:
+        text = str(row[text_field]).strip()
+        if not text:
+            continue
+        token_count += count_tokens(text, tokenizer)
+        jsonl_handle.write(to_jsonl({"language": language, "text": text}))
+        txt_handle.write(text.replace("\n", " ") + "\n")
+        rows += 1
+        if token_count >= target_tokens:
+            return token_count, rows, True
+    return token_count, rows, False
 
 
 def language_seed(seed: int, language: str) -> int:
@@ -188,5 +338,7 @@ if __name__ == "__main__":
     parser.add_argument("--allow_underfilled", type=str_to_bool, default=True)
     parser.add_argument("--shuffle_output", type=str_to_bool, default=False)
     parser.add_argument("--sample_shuffle_buffer_size", type=int, default=0)
+    parser.add_argument("--madlad_cache_root")
+    parser.add_argument("--cache_fallback_to_hf", type=str_to_bool, default=True)
     parser.add_argument("--seed", type=int, default=13)
     main(**vars(parser.parse_args()))
