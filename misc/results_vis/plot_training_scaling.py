@@ -29,34 +29,77 @@ def main() -> None:
         raise ValueError(f"No training-scaling metric outputs found in {args.input_dir}.")
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    write_csv(rows, args.output_dir / "training_scaling_summary.csv")
-    for strategy in sorted({row["strategy"] for row in rows}):
-        strategy_rows = [row for row in rows if row["strategy"] == strategy]
+    summary_rows = aggregate_rows(rows)
+    write_csv(rows, args.output_dir / "training_scaling_raw.csv", raw=True)
+    write_csv(summary_rows, args.output_dir / "training_scaling_summary.csv")
+    for strategy in sorted({row["strategy"] for row in summary_rows}):
+        strategy_rows = [row for row in summary_rows if row["strategy"] == strategy]
         strategy_dir = args.output_dir / strategy
         strategy_dir.mkdir(parents=True, exist_ok=True)
         write_csv(strategy_rows, strategy_dir / "summary.csv")
-    plot_rows(rows, args.output_dir, args.formats)
+    plot_rows(summary_rows, args.output_dir, args.formats)
     print(args.output_dir)
 
 
 def load_rows(input_dir: Path) -> list[dict[str, Any]]:
     rows = []
-    for path in sorted(input_dir.glob("*/*/*/*.json")):
-        if path.parts[-4].startswith("_"):
+    for path in sorted(input_dir.glob("**/*.json")):
+        rel = path.relative_to(input_dir)
+        parts = rel.parts
+        if len(parts) == 4:
+            seed = ""
+            strategy, subset, _, _ = parts
+        elif len(parts) == 5:
+            seed, strategy, subset, _, _ = parts
+        else:
+            continue
+        if seed.startswith("_") or strategy.startswith("_"):
             continue
         with path.open() as handle:
             payload = json.load(handle)
         for metric_name, value in extract_values(payload):
             rows.append({
-                "strategy": path.parts[-4],
-                "subset": path.parts[-3],
-                "size": int(path.parts[-3].removeprefix("n")),
+                "seed": seed,
+                "strategy": strategy,
+                "subset": subset,
+                "size": int(subset.removeprefix("n")),
                 "dataset": payload["dataset"],
                 "metric": metric_name,
                 "value": value,
                 "path": str(path),
             })
-    return sorted(rows, key=lambda row: (row["metric"], row["dataset"], row["strategy"], row["size"]))
+    return sorted(rows, key=lambda row: (row["metric"], row["dataset"], row["strategy"], row["size"], row["seed"]))
+
+
+def aggregate_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    import math
+    from statistics import mean, stdev
+
+    grouped: dict[tuple[str, str, int, str, str], list[dict[str, Any]]] = {}
+    for row in rows:
+        key = (row["strategy"], row["subset"], row["size"], row["dataset"], row["metric"])
+        grouped.setdefault(key, []).append(row)
+
+    summary = []
+    for (strategy, subset, size, dataset, metric), group in grouped.items():
+        values = [float(row["value"]) for row in group]
+        seeds = sorted({row["seed"] or "unseeded" for row in group})
+        std = stdev(values) if len(values) > 1 else 0.0
+        summary.append({
+            "strategy": strategy,
+            "subset": subset,
+            "size": size,
+            "dataset": dataset,
+            "metric": metric,
+            "value": mean(values),
+            "mean": mean(values),
+            "std": std,
+            "stderr": std / math.sqrt(len(values)) if values else 0.0,
+            "num_seeds": len(values),
+            "seeds": ",".join(seeds),
+            "path": ";".join(row["path"] for row in group),
+        })
+    return sorted(summary, key=lambda row: (row["metric"], row["dataset"], row["strategy"], row["size"]))
 
 
 def extract_values(payload: dict[str, Any]) -> list[tuple[str, float]]:
@@ -119,12 +162,16 @@ def final_effective_dim(rows: Any) -> float | None:
     return float(value) if isinstance(value, (int, float)) else None
 
 
-def write_csv(rows: list[dict[str, Any]], path: Path) -> None:
+def write_csv(rows: list[dict[str, Any]], path: Path, raw: bool = False) -> None:
+    if not rows:
+        return
+    fieldnames = (
+        ["seed", "strategy", "subset", "size", "dataset", "metric", "value", "path"]
+        if raw
+        else ["strategy", "subset", "size", "dataset", "metric", "mean", "std", "stderr", "num_seeds", "seeds", "path"]
+    )
     with path.open("w", newline="") as handle:
-        writer = csv.DictWriter(
-            handle,
-            fieldnames=["strategy", "subset", "size", "dataset", "metric", "value", "path"],
-        )
+        writer = csv.DictWriter(handle, fieldnames=fieldnames, extrasaction="ignore")
         writer.writeheader()
         writer.writerows(rows)
 
@@ -175,11 +222,13 @@ def plot_metric_overlay(
         )
         if not dataset_rows:
             continue
-        ax.plot(
+        ax.errorbar(
             [row["size"] for row in dataset_rows],
-            [row["value"] for row in dataset_rows],
+            [row["mean"] for row in dataset_rows],
+            yerr=[row.get("std", 0.0) for row in dataset_rows],
             marker="o",
             linewidth=2,
+            capsize=3,
             label=pretty(dataset),
             color=colors[dataset],
         )
@@ -200,11 +249,13 @@ def plot_metric_dataset(
 ) -> None:
     rows = sorted(rows, key=lambda row: row["size"])
     fig, ax = plt.subplots(figsize=(6.5, 4.2))
-    ax.plot(
+    ax.errorbar(
         [row["size"] for row in rows],
-        [row["value"] for row in rows],
+        [row["mean"] for row in rows],
+        yerr=[row.get("std", 0.0) for row in rows],
         marker="o",
         linewidth=2,
+        capsize=3,
         color=color,
     )
     style_axis(ax, f"{pretty(metric)} on {pretty(dataset)}", pretty(metric), sizes)
@@ -234,12 +285,14 @@ def plot_strategy_overview(
             )
             if not dataset_rows:
                 continue
-            ax.plot(
+            ax.errorbar(
                 [row["size"] for row in dataset_rows],
-                [row["value"] for row in dataset_rows],
+                [row["mean"] for row in dataset_rows],
+                yerr=[row.get("std", 0.0) for row in dataset_rows],
                 marker="o",
                 linewidth=1.8,
                 markersize=4,
+                capsize=2,
                 label=pretty(dataset),
                 color=colors[dataset],
             )

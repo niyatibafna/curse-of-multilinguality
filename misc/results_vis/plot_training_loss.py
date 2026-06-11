@@ -69,8 +69,12 @@ def read_loss_rows(log_dir: Path, job_id: str | None) -> list[dict[str, Any]]:
 
 def read_jsonl_loss_rows(loss_root: Path) -> list[dict[str, Any]]:
     rows = []
-    for path in sorted(loss_root.glob("*/*/training_loss.jsonl"), key=jsonl_sort_key):
-        strategy = path.parents[1].name
+    for path in sorted(loss_root.glob("**/training_loss.jsonl"), key=jsonl_sort_key):
+        rel = path.relative_to(loss_root)
+        if len(rel.parts) < 3:
+            continue
+        subset = path.parent.name
+        strategy = "/".join(rel.parts[:-2])
         subset = path.parent.name
         with path.open() as handle:
             for line in handle:
@@ -92,7 +96,11 @@ def read_jsonl_loss_rows(loss_root: Path) -> list[dict[str, Any]]:
 
 
 def jsonl_sort_key(path: Path) -> tuple[str, int]:
-    return (path.parents[1].name, int(path.parent.name[1:]))
+    try:
+        size = int(path.parent.name[1:])
+    except ValueError:
+        size = 0
+    return (str(path.parent.parent), size)
 
 
 def none_or_float(value: Any) -> float | None:
