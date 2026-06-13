@@ -27,9 +27,14 @@ MIN_LANGUAGES = {
     "concept_language_principal_angle_overlap_20": 2,
     "concept_language_principal_angle_overlap_50": 2,
     "concept_language_principal_angle_overlap_90": 2,
+    "eff_langspace_dim_prop": 2,
     "language_space_dim_growth_by_language": 2,
     "language_space_growth_by_concepts": 2,
     "monolingual_structure_condition": 2,
+    "nearest_neighbor_overlap_against_monolingual": 1,
+    "nearest_neighbor_overlap_against_monolingual_5": 1,
+    "nearest_neighbor_overlap_against_monolingual_10": 1,
+    "rmse_against_monolingual": 1,
 }
 
 

@@ -22,6 +22,12 @@ def main(
     random_baseline_trials: int = 1,
     random_baseline_seed: int = 0,
     alignment_batch_size: int = 64,
+    monolingual_reference_language: str = "eng_Latn",
+    monolingual_reference_dataset_language: str | None = None,
+    monolingual_reference_model: str | None = None,
+    monolingual_reference_model_type: str = "mbert",
+    monolingual_reference_pooling: str | None = None,
+    monolingual_reference_neighbor_k: int | None = None,
 ) -> None:
     if index is None:
         import os
@@ -66,6 +72,12 @@ def main(
         random_baseline_trials=random_baseline_trials,
         random_baseline_seed=random_baseline_seed,
         alignment_batch_size=alignment_batch_size,
+        monolingual_reference_language=monolingual_reference_language,
+        monolingual_reference_dataset_language=monolingual_reference_dataset_language,
+        monolingual_reference_model=monolingual_reference_model,
+        monolingual_reference_model_type=monolingual_reference_model_type,
+        monolingual_reference_pooling=monolingual_reference_pooling,
+        monolingual_reference_neighbor_k=monolingual_reference_neighbor_k,
     )
 
 
@@ -94,4 +106,10 @@ if __name__ == "__main__":
     parser.add_argument("--random_baseline_trials", type=int, default=1)
     parser.add_argument("--random_baseline_seed", type=int, default=0)
     parser.add_argument("--alignment_batch_size", type=int, default=64)
+    parser.add_argument("--monolingual_reference_language", default="eng_Latn")
+    parser.add_argument("--monolingual_reference_dataset_language")
+    parser.add_argument("--monolingual_reference_model")
+    parser.add_argument("--monolingual_reference_model_type", default="mbert")
+    parser.add_argument("--monolingual_reference_pooling")
+    parser.add_argument("--monolingual_reference_neighbor_k", type=int)
     main(**vars(parser.parse_args()))

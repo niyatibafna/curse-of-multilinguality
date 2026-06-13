@@ -95,14 +95,15 @@ python -m src.training.make_language_plan \
   --num_languages <max_languages> \
   --sizes <comma_separated_group_sizes> \
   --order_by_madlad_resource \
-  --resource_split clean
+  --resource_split clean_bytes
 ```
 
 Notes:
 
 - Eval overlap is prioritized before filling the rest of the pool.
-- MADLAD resource ordering uses Hugging Face shard counts as a proxy, not exact
-  token counts under the tokenizer.
+- MADLAD resource ordering uses local MADLAD byte counts from
+  `src/utils/language_sorting/madlad_counts.csv`; the default is
+  `clean_bytes`.
 - The final language in the max-size group is not guaranteed to be the lowest
   actual-token language.
 
@@ -502,6 +503,36 @@ These are completed or queued examples, not defaults for future lanes.
   - Uses the v4 100-language tokenizer only as the seed tokenizer for counting
     tokenizer-corpus sampling tokens.
   - Scaling plots aggregate means across seeds and show standard deviation.
+- v6:
+  - Same fixed 500M language groups and five seed replicates as v5.
+  - Uses one shared tokenizer from v5, default
+    `tokenizers/bert_wordpiece_50000_v5/seed1/n100`.
+  - Reuses v5 raw training corpora as source text. For each seed/group, v6
+    reads the v5 JSONL in order, counts tokens with the shared tokenizer, and
+    writes the prefix that reaches 500M tokens.
+  - Checkpoints stay nested by seed:
+    `checkpoints_v6/seed<k>/fixed_500m/n<size>`.
+- v7:
+  - Fixed 500M with imbalanced resource-proportional language mixtures.
+  - Each language gets a 10K-token floor; the remaining budget is allocated
+    proportional to MADLAD clean bytes from
+    `src/utils/language_sorting/language_plan_clean_bytes_ordered.csv`.
+  - Uses `language_plan_clean_bytes_ordered.json` and group sizes
+    `2,5,10,20,30,40,50,75,100`.
+  - Trains one tokenizer per language group on that group's imbalanced corpus;
+    tokenizers are reused across the five training seeds.
+  - Artifacts use `corpora_v7/seed<k>/fixed_500m_resource/n<size>`,
+    `tokenizers/bert_wordpiece_50000_v7/n<size>`, and
+    `checkpoints_v7/seed<k>/fixed_500m_resource/n<size>`.
+- v8:
+  - Balanced fixed 500M control for v7.
+  - Uses the same clean-byte ordered language groups and sizes as v7, but splits
+    tokens equally across languages within each group.
+  - Trains one tokenizer per language group and reuses that tokenizer across
+    the five training seeds.
+  - Artifacts use `corpora_v8/seed<k>/fixed_500m_balanced/n<size>`,
+    `tokenizers/bert_wordpiece_50000_v8/n<size>`, and
+    `checkpoints_v8/seed<k>/fixed_500m_balanced/n<size>`.
 
 ## Environment Notes
 

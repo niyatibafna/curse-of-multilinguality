@@ -22,9 +22,13 @@ def main() -> None:
     parser.add_argument("--input_dir", type=Path, default=DEFAULT_INPUT_DIR)
     parser.add_argument("--output_dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--formats", nargs="+", default=["png"], choices=["png", "pdf", "svg"])
+    parser.add_argument("--metrics")
     args = parser.parse_args()
 
     rows = load_rows(args.input_dir)
+    if args.metrics:
+        requested_metrics = {item.strip() for item in args.metrics.split(",") if item.strip()}
+        rows = [row for row in rows if row["metric"] in requested_metrics]
     if not rows:
         raise ValueError(f"No training-scaling metric outputs found in {args.input_dir}.")
 
@@ -131,8 +135,13 @@ def extract_value(payload: dict[str, Any]) -> float | None:
         "concept_language_principal_angle_overlap_20": "adjusted_mean_squared_cosine",
         "concept_language_principal_angle_overlap_50": "adjusted_mean_squared_cosine",
         "concept_language_principal_angle_overlap_90": "adjusted_mean_squared_cosine",
+        "eff_langspace_dim_prop": "score",
         "individual_concept_dimensionality": "effective_dim_by_language",
         "monolingual_structure_condition": "score",
+        "nearest_neighbor_overlap_against_monolingual": "score",
+        "nearest_neighbor_overlap_against_monolingual_5": "score",
+        "nearest_neighbor_overlap_against_monolingual_10": "score",
+        "rmse_against_monolingual": "score",
     }
     if metric == "concept_space_dim_growth_by_language":
         return final_effective_dim(result.get("concept_space_dim_growth_by_language"))
