@@ -31,6 +31,7 @@ def main(
     tokenizer_path: str | None = None,
     max_tokens_per_language: int = 750_000_000,
     overwrite: bool = False,
+    skip_existing: bool = False,
     write_index: bool = True,
 ) -> None:
     tokenizer = load_tokenizer(tokenizer_path)
@@ -60,6 +61,7 @@ def main(
             tokenizer_path=tokenizer_path,
             max_tokens=max_tokens_per_language,
             overwrite=overwrite,
+            skip_existing=skip_existing,
         )
         manifests.append(manifest)
 
@@ -96,11 +98,15 @@ def build_language_cache(
     tokenizer_path: str | None,
     max_tokens: int,
     overwrite: bool,
+    skip_existing: bool,
 ) -> dict[str, Any]:
     output = cache_language_path(root, split, language)
     manifest_path = cache_manifest_path(root, split, language)
     if not overwrite and manifest_path.exists() and output.exists():
         manifest = read_json(manifest_path)
+        if skip_existing:
+            print(output)
+            return manifest
         if manifest.get("tokens", 0) >= max_tokens or manifest.get("exhausted"):
             print(output)
             return manifest
@@ -165,5 +171,6 @@ if __name__ == "__main__":
     parser.add_argument("--tokenizer_path")
     parser.add_argument("--max_tokens_per_language", type=int, default=750_000_000)
     parser.add_argument("--overwrite", type=str_to_bool, default=False)
+    parser.add_argument("--skip_existing", type=str_to_bool, default=False)
     parser.add_argument("--write_index", type=str_to_bool, default=True)
     main(**vars(parser.parse_args()))
