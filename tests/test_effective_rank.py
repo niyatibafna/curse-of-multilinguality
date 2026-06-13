@@ -7,6 +7,7 @@ import numpy as np
 from src.metrics.interaction_between_concept_and_language import (
     Comness,
     ConceptLanguagePrincipalAngleOverlap,
+    EffLangspaceDimProp,
 )
 from src.metrics.concept_space_dimensionality import (
     ConceptSpaceDimGrowthByConcept,
@@ -437,6 +438,40 @@ class ComnessTest(unittest.TestCase):
 
         self.assertIn("d_lang", details)
         self.assertNotIn("normalized_comness", details)
+
+    def test_eff_langspace_dim_prop_uses_pairwise_total_displacements(self):
+        result = EffLangspaceDimProp(
+            self.embeddings,
+            num_concepts=4,
+            num_languages=3,
+            embedding_dim=3,
+            normalize=False,
+        ).compute()
+        X = stack_language_embeddings(self.embeddings, 4, 3, 3)
+        d_lang = pairwise_displacement_effective_rank(
+            (X[:, c, :] for c in range(4)),
+            embedding_dim=3,
+        )
+        d_total = pairwise_displacement_effective_rank(
+            [X.reshape(-1, 3)],
+            embedding_dim=3,
+        )
+
+        self.assertAlmostEqual(result["d_lang"], d_lang)
+        self.assertAlmostEqual(result["d_total"], d_total)
+        self.assertAlmostEqual(result["score"], d_lang / d_total)
+        self.assertEqual(result["num_language_displacements"], 12)
+        self.assertEqual(result["num_total_displacements"], 66)
+
+    def test_eff_langspace_dim_prop_requires_two_languages(self):
+        with self.assertRaises(ValueError):
+            EffLangspaceDimProp(
+                {"a": self.embeddings["a"]},
+                num_concepts=4,
+                num_languages=1,
+                embedding_dim=3,
+                normalize=False,
+            ).compute()
 
 
 class ConceptLanguagePrincipalAngleOverlapTest(unittest.TestCase):

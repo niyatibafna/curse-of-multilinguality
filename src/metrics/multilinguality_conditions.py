@@ -350,3 +350,168 @@ class MonolingualStructureCondition(COMMetric):
         if abs(denominator) <= np.finfo(float).eps:
             return None
         return numerator / denominator
+
+
+class RmseAgainstMonolingual(MonolingualStructureCondition):
+    """
+    RMSE between each language's concept-pair distances and an external monolingual model.
+    """
+
+    def compute(self) -> dict[str, Any]:
+        if self.num_languages < 1:
+            raise ValueError("RmseAgainstMonolingual requires at least one language.")
+        if self.num_concepts < 3:
+            raise ValueError("RmseAgainstMonolingual requires at least three concepts.")
+
+        reference_embeddings = self.kwargs.get("reference_embeddings")
+        if reference_embeddings is None:
+            raise ValueError("RmseAgainstMonolingual requires reference_embeddings.")
+        reference = np.asarray(reference_embeddings)
+        if reference.shape[0] != self.num_concepts:
+            raise ValueError(
+                "Expected reference_embeddings to have "
+                f"{self.num_concepts} concepts, got {reference.shape[0]}."
+            )
+        if reference.ndim != 2:
+            raise ValueError("Expected reference_embeddings to be a 2D array.")
+        if not np.all(np.isfinite(reference)):
+            raise ValueError("reference_embeddings contains NaN or infinite values.")
+
+        languages = list(self.X.keys())
+        arrays = self._validated_arrays(languages)
+        reference_stats = self._distance_vector_stats(self._cosine_distance_pairs(reference))
+
+        language_rows = []
+        measure_values: dict[str, list[float]] = {
+            "pearson": [],
+            "spearman": [],
+            "mae": [],
+            "rmse": [],
+            "normalized_rmse": [],
+            "centered_rmse": [],
+            "standardized_rmse": [],
+            "mean_distance_ratio": [],
+            "std_distance_ratio": [],
+        }
+        num_concept_pairs = len(reference_stats["distances"])
+        for language, array in zip(languages, arrays):
+            measures = self._distance_vector_measures(
+                self._distance_vector_stats(self._cosine_distance_pairs(array)),
+                reference_stats,
+            )
+            for name, value in measures.items():
+                if value is not None and name in measure_values:
+                    measure_values[name].append(value)
+            language_rows.append({
+                "language": language,
+                "reference_language": self.kwargs.get("reference_language"),
+                "num_concept_pairs": num_concept_pairs,
+                **measures,
+            })
+
+        mean_measures = {
+            f"mean_{name}": float(np.mean(values)) if values else None
+            for name, values in measure_values.items()
+        }
+        return {
+            "score": mean_measures["mean_rmse"],
+            "distance": "cosine",
+            "reference_language": self.kwargs.get("reference_language"),
+            "reference_model": self.kwargs.get("reference_model"),
+            "num_languages": self.num_languages,
+            "num_concepts": self.num_concepts,
+            "num_concept_pairs": num_concept_pairs,
+            "num_valid_languages": len(measure_values["rmse"]),
+            **mean_measures,
+            "languages": languages,
+            "language_comparisons": language_rows,
+        }
+
+
+class NearestNeighborOverlapAgainstMonolingual(MonolingualStructureCondition):
+    """
+    Mean k-nearest-neighbor concept overlap against an external monolingual model.
+    """
+
+    def compute(self) -> dict[str, Any]:
+        if self.num_languages < 1:
+            raise ValueError(
+                "NearestNeighborOverlapAgainstMonolingual requires at least one language."
+            )
+        k = int(self.kwargs.get("nearest_neighbor_k", 10))
+        if k <= 0:
+            raise ValueError("nearest_neighbor_k must be positive.")
+        if self.num_concepts <= k:
+            raise ValueError(
+                "NearestNeighborOverlapAgainstMonolingual requires more concepts than k."
+            )
+
+        reference_embeddings = self.kwargs.get("reference_embeddings")
+        if reference_embeddings is None:
+            raise ValueError(
+                "NearestNeighborOverlapAgainstMonolingual requires reference_embeddings."
+            )
+        reference = np.asarray(reference_embeddings)
+        if reference.shape[0] != self.num_concepts:
+            raise ValueError(
+                "Expected reference_embeddings to have "
+                f"{self.num_concepts} concepts, got {reference.shape[0]}."
+            )
+        if reference.ndim != 2:
+            raise ValueError("Expected reference_embeddings to be a 2D array.")
+        if not np.all(np.isfinite(reference)):
+            raise ValueError("reference_embeddings contains NaN or infinite values.")
+
+        languages = list(self.X.keys())
+        arrays = self._validated_arrays(languages)
+        reference_neighbors = self._nearest_neighbor_indices(reference, k)
+
+        language_rows = []
+        language_overlaps = []
+        for language, array in zip(languages, arrays):
+            target_neighbors = self._nearest_neighbor_indices(array, k)
+            concept_overlaps = self._concept_overlaps(reference_neighbors, target_neighbors, k)
+            mean_overlap = float(np.mean(concept_overlaps))
+            language_overlaps.append(mean_overlap)
+            row = {
+                "language": language,
+                "reference_language": self.kwargs.get("reference_language"),
+                "k": k,
+                "num_concepts": self.num_concepts,
+                "mean_overlap": mean_overlap,
+                "std_overlap": float(np.std(concept_overlaps)),
+            }
+            if self.return_details:
+                row["concept_overlaps"] = concept_overlaps
+            language_rows.append(row)
+
+        mean_overlap = float(np.mean(language_overlaps)) if language_overlaps else None
+        return {
+            "score": mean_overlap,
+            "mean_overlap": mean_overlap,
+            "k": k,
+            "similarity": "cosine",
+            "reference_language": self.kwargs.get("reference_language"),
+            "reference_model": self.kwargs.get("reference_model"),
+            "num_languages": self.num_languages,
+            "num_concepts": self.num_concepts,
+            "languages": languages,
+            "language_comparisons": language_rows,
+        }
+
+    def _nearest_neighbor_indices(self, embeddings: np.ndarray, k: int) -> np.ndarray:
+        normalized = self._normalize_rows(embeddings)
+        similarity = normalized @ normalized.T
+        np.fill_diagonal(similarity, -np.inf)
+        return np.argsort(-similarity, axis=1, kind="mergesort")[:, :k]
+
+    def _concept_overlaps(
+        self,
+        reference_neighbors: np.ndarray,
+        target_neighbors: np.ndarray,
+        k: int,
+    ) -> list[float]:
+        overlaps = []
+        for reference_row, target_row in zip(reference_neighbors, target_neighbors):
+            overlaps.append(len(set(reference_row).intersection(target_row)) / k)
+        return overlaps

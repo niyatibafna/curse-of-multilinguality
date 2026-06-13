@@ -5,6 +5,8 @@ import numpy as np
 from src.metrics.multilinguality_conditions import (
     AlignmentCondition,
     MonolingualStructureCondition,
+    NearestNeighborOverlapAgainstMonolingual,
+    RmseAgainstMonolingual,
 )
 
 
@@ -211,3 +213,80 @@ def test_monolingual_structure_condition_constant_distances_are_undefined() -> N
     assert np.isclose(result["language_pairs"][0]["mae"], 0.0)
     assert np.isclose(result["language_pairs"][0]["rmse"], 0.0)
     assert np.isclose(result["language_pairs"][0]["mean_distance_ratio"], 1.0)
+
+
+def test_rmse_against_monolingual_accepts_single_language_reference() -> None:
+    reference = np.array([
+        [1.0, 0.0],
+        [0.5, np.sqrt(3.0) / 2.0],
+        [-0.5, np.sqrt(3.0) / 2.0],
+        [-1.0, 0.0],
+    ])
+    embeddings = {"fr": reference.copy()}
+
+    result = RmseAgainstMonolingual(
+        embeddings,
+        num_concepts=4,
+        num_languages=1,
+        embedding_dim=2,
+        reference_embeddings=reference,
+        reference_language="eng_Latn",
+        reference_model="monolingual",
+    ).compute()
+
+    assert np.isclose(result["score"], 0.0)
+    assert np.isclose(result["mean_rmse"], 0.0)
+    assert result["num_valid_languages"] == 1
+    assert result["language_comparisons"][0]["language"] == "fr"
+    assert result["language_comparisons"][0]["reference_language"] == "eng_Latn"
+
+
+def test_nearest_neighbor_overlap_against_monolingual_matches_reference() -> None:
+    reference = np.array([
+        [1.0, 0.0],
+        [0.9, 0.1],
+        [0.0, 1.0],
+        [-1.0, 0.0],
+    ])
+    embeddings = {"fr": reference.copy()}
+
+    result = NearestNeighborOverlapAgainstMonolingual(
+        embeddings,
+        num_concepts=4,
+        num_languages=1,
+        embedding_dim=2,
+        reference_embeddings=reference,
+        reference_language="eng_Latn",
+        nearest_neighbor_k=1,
+    ).compute()
+
+    assert result["score"] == 1.0
+    assert result["mean_overlap"] == 1.0
+    assert result["language_comparisons"][0]["mean_overlap"] == 1.0
+
+
+def test_nearest_neighbor_overlap_against_monolingual_averages_concepts() -> None:
+    reference = np.array([
+        [1.0, 0.0],
+        [0.9, 0.1],
+        [0.0, 1.0],
+        [-1.0, 0.0],
+    ])
+    target = np.array([
+        [0.9, 0.1],
+        [1.0, 0.0],
+        [0.0, 1.0],
+        [-1.0, 0.0],
+    ])
+
+    result = NearestNeighborOverlapAgainstMonolingual(
+        {"fr": target},
+        num_concepts=4,
+        num_languages=1,
+        embedding_dim=2,
+        reference_embeddings=reference,
+        nearest_neighbor_k=1,
+    ).compute()
+
+    assert np.isclose(result["score"], 0.75)
+    assert np.isclose(result["language_comparisons"][0]["mean_overlap"], 0.75)

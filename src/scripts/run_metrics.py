@@ -22,10 +22,13 @@ from src.metrics import (
     ConceptLanguagePrincipalAngleOverlap,
     ConceptSpaceDimGrowthByConcept,
     ConceptSpaceDimGrowthByLanguage,
+    EffLangspaceDimProp,
     IndividualLanguageConceptDimensionality,
     LanguageSpaceDimGrowthByLanguage,
     LanguageSpaceGrowthByConcepts,
     MonolingualStructureCondition,
+    NearestNeighborOverlapAgainstMonolingual,
+    RmseAgainstMonolingual,
 )
 from src.models import MODEL_REGISTRY, EmbeddingModel, load_model
 
@@ -41,10 +44,22 @@ METRICS = {
     "concept_language_principal_angle_overlap_90": ConceptLanguagePrincipalAngleOverlap,
     "concept_space_dim_growth_by_concept": ConceptSpaceDimGrowthByConcept,
     "concept_space_dim_growth_by_language": ConceptSpaceDimGrowthByLanguage,
+    "eff_langspace_dim_prop": EffLangspaceDimProp,
     "individual_concept_dimensionality": IndividualLanguageConceptDimensionality,
     "language_space_dim_growth_by_language": LanguageSpaceDimGrowthByLanguage,
     "language_space_growth_by_concepts": LanguageSpaceGrowthByConcepts,
     "monolingual_structure_condition": MonolingualStructureCondition,
+    "nearest_neighbor_overlap_against_monolingual": NearestNeighborOverlapAgainstMonolingual,
+    "nearest_neighbor_overlap_against_monolingual_5": NearestNeighborOverlapAgainstMonolingual,
+    "nearest_neighbor_overlap_against_monolingual_10": NearestNeighborOverlapAgainstMonolingual,
+    "rmse_against_monolingual": RmseAgainstMonolingual,
+}
+
+REFERENCE_METRICS = {
+    "nearest_neighbor_overlap_against_monolingual",
+    "nearest_neighbor_overlap_against_monolingual_5",
+    "nearest_neighbor_overlap_against_monolingual_10",
+    "rmse_against_monolingual",
 }
 
 METRIC_DEFAULT_KWARGS = {
@@ -52,6 +67,8 @@ METRIC_DEFAULT_KWARGS = {
     "concept_language_principal_angle_overlap_20": {"subspace_energy_threshold": 0.2},
     "concept_language_principal_angle_overlap_50": {"subspace_energy_threshold": 0.5},
     "concept_language_principal_angle_overlap_90": {"subspace_energy_threshold": 0.9},
+    "nearest_neighbor_overlap_against_monolingual_5": {"nearest_neighbor_k": 5},
+    "nearest_neighbor_overlap_against_monolingual_10": {"nearest_neighbor_k": 10},
 }
 
 DEFAULT_POOLING = {
@@ -81,6 +98,12 @@ def main(
     similarity: str = "cosine",
     negative_view: str | None = None,
     alignment_batch_size: int = 64,
+    monolingual_reference_language: str = "eng_Latn",
+    monolingual_reference_dataset_language: str | None = None,
+    monolingual_reference_model: str | None = None,
+    monolingual_reference_model_type: str = "mbert",
+    monolingual_reference_pooling: str | None = None,
+    monolingual_reference_neighbor_k: int | None = None,
 ) -> None:
     models = as_list(models)
     model_aliases = as_list(model_aliases)
@@ -107,8 +130,42 @@ def main(
         log(f"loading dataset={dataset_name}")
         texts, dataset_split = load_texts(dataset_name, dataset_languages, requested_split)
         languages = select_languages(texts, eval_languages or dataset_languages)
-        texts = filter_texts_for_languages(texts, languages)
+        reference_dataset_language = resolve_reference_dataset_language(
+            dataset_name,
+            monolingual_reference_language,
+            monolingual_reference_dataset_language,
+        )
+        required_languages = list(languages)
+        if any(metric in REFERENCE_METRICS for metric in metrics):
+            if reference_dataset_language not in required_languages:
+                required_languages.append(reference_dataset_language)
+        texts = filter_texts_for_languages(texts, required_languages)
         log(f"loaded {len(texts)} texts with {len(languages)} languages: {', '.join(languages)}")
+
+        reference_embeddings = None
+        reference_model_path = None
+        if any(metric in REFERENCE_METRICS for metric in metrics):
+            reference_model_path = monolingual_reference_model or str(
+                default_monolingual_reference_model(monolingual_reference_language)
+            )
+            reference_pooling = resolve_pooling(
+                monolingual_reference_model_type,
+                monolingual_reference_pooling if monolingual_reference_pooling is not None else pooling,
+            )
+            reference_embeddings = load_reference_embeddings(
+                model_name=reference_model_path,
+                model_type=monolingual_reference_model_type,
+                dataset_name=dataset_name,
+                split=dataset_split,
+                texts=texts,
+                reference_language=reference_dataset_language,
+                layer=layer,
+                batch_size=batch_size,
+                pooling=reference_pooling,
+                device=device,
+            )
+        else:
+            reference_pooling = None
 
         for model_index, model_name in enumerate(models):
             output_model_name = (
@@ -184,6 +241,19 @@ def main(
                 }
                 if negative_view is not None:
                     extra_metric_kwargs["negative_view"] = negative_view
+                if metric_name in REFERENCE_METRICS:
+                    if reference_embeddings is None:
+                        raise ValueError(f"Metric {metric_name} requires reference embeddings.")
+                    extra_metric_kwargs.update({
+                        "reference_embeddings": slice_embedding_array(
+                            reference_embeddings[reference_dataset_language],
+                            max_texts,
+                        ),
+                        "reference_language": reference_dataset_language,
+                        "reference_model": reference_model_path,
+                    })
+                    if monolingual_reference_neighbor_k is not None:
+                        extra_metric_kwargs["nearest_neighbor_k"] = monolingual_reference_neighbor_k
 
                 result = compute_metric(
                     metric_name,
@@ -208,6 +278,32 @@ def main(
                         "num_concepts": len(next(iter(metric_embeddings.values()))),
                         "num_cached_concepts": len(next(iter(embeddings.values()))),
                         "embedding_dim": int(next(iter(metric_embeddings.values())).shape[-1]),
+                        "monolingual_reference_model": (
+                            reference_model_path if metric_name in REFERENCE_METRICS else None
+                        ),
+                        "monolingual_reference_model_type": (
+                            monolingual_reference_model_type
+                            if metric_name in REFERENCE_METRICS
+                            else None
+                        ),
+                        "monolingual_reference_language": (
+                            monolingual_reference_language
+                            if metric_name in REFERENCE_METRICS
+                            else None
+                        ),
+                        "monolingual_reference_dataset_language": (
+                            reference_dataset_language
+                            if metric_name in REFERENCE_METRICS
+                            else None
+                        ),
+                        "monolingual_reference_pooling": (
+                            reference_pooling if metric_name in REFERENCE_METRICS else None
+                        ),
+                        "monolingual_reference_neighbor_k": (
+                            monolingual_reference_neighbor_k
+                            if metric_name in REFERENCE_METRICS
+                            else None
+                        ),
                     },
                 )
                 log(f"wrote {output_path}")
@@ -318,6 +414,125 @@ def embed_texts(
     return embeddings
 
 
+def load_reference_embeddings(
+    model_name: str,
+    model_type: str,
+    dataset_name: str,
+    split: str,
+    texts: list[dict[str, Any]],
+    reference_language: str,
+    layer: int,
+    batch_size: int,
+    pooling: str,
+    device: str | None,
+) -> dict[str, np.ndarray]:
+    metadata = embedding_cache_metadata(
+        model_name=model_name,
+        model_type=model_type,
+        dataset_name=dataset_name,
+        split=split,
+        dataset_languages=[reference_language],
+        eval_languages=[reference_language],
+        texts=texts,
+        layer=layer,
+        batch_size=batch_size,
+        pooling=pooling,
+    )
+    cache_path = embedding_cache_path(metadata)
+    embeddings = read_embedding_cache(cache_path, metadata)
+    if embeddings is not None:
+        log(f"loaded monolingual reference embedding cache {cache_path}")
+        return embeddings
+    embeddings = read_reference_from_superset_cache(cache_path, metadata, reference_language)
+    if embeddings is not None:
+        return embeddings
+
+    lock_path = cache_path.with_suffix(cache_path.suffix + ".lock")
+    while True:
+        try:
+            lock_path.mkdir(parents=True)
+            break
+        except FileExistsError:
+            log(f"waiting for monolingual reference embedding cache {cache_path}")
+            time.sleep(30)
+            embeddings = read_embedding_cache(cache_path, metadata)
+            if embeddings is not None:
+                return embeddings
+            embeddings = read_reference_from_superset_cache(
+                cache_path,
+                metadata,
+                reference_language,
+            )
+            if embeddings is not None:
+                return embeddings
+
+    try:
+        log(f"loading monolingual reference model={model_name} model_type={model_type}")
+        model = load_model(model_type, model_name_or_path=model_name, layer=layer, device=device)
+        log(
+            "encoding monolingual reference "
+            f"language={reference_language} dataset={dataset_name} pooling={pooling}"
+        )
+        embeddings = embed_texts(model, texts, [reference_language], batch_size, pooling)
+        write_embedding_cache(cache_path, metadata, embeddings)
+        log(f"wrote monolingual reference embedding cache {cache_path}")
+        return embeddings
+    finally:
+        if lock_path.exists():
+            lock_path.rmdir()
+
+
+def read_reference_from_superset_cache(
+    output_cache_path: Path,
+    expected_metadata: dict[str, Any],
+    reference_language: str,
+) -> dict[str, np.ndarray] | None:
+    for path in sorted((project_datadir() / "embeddings").glob("*.npz")):
+        if path == output_cache_path:
+            continue
+        try:
+            with np.load(path, allow_pickle=False) as data:
+                metadata = json.loads(str(data["__metadata__"].item()))
+                languages = list(metadata.get("eval_languages", []))
+                if not compatible_reference_cache(metadata, expected_metadata, reference_language):
+                    continue
+                language_index = languages.index(reference_language)
+                embeddings = {reference_language: np.asarray(data[f"lang_{language_index}"])}
+        except (OSError, KeyError, ValueError, json.JSONDecodeError):
+            continue
+        write_embedding_cache(output_cache_path, expected_metadata, embeddings)
+        log(f"extracted monolingual reference embedding cache {output_cache_path} from {path}")
+        return embeddings
+    return None
+
+
+def compatible_reference_cache(
+    metadata: dict[str, Any],
+    expected: dict[str, Any],
+    reference_language: str,
+) -> bool:
+    if reference_language not in metadata.get("eval_languages", []):
+        return False
+    for key in ["model_type", "dataset", "split", "num_texts", "text_ids_hash", "layer", "pooling"]:
+        if metadata.get(key) != expected.get(key):
+            return False
+    if metadata.get("model") in compatible_reference_model_names(expected):
+        return True
+    return False
+
+
+def compatible_reference_model_names(expected: dict[str, Any]) -> set[str]:
+    names = {str(expected["model"])}
+    model_type = str(expected["model_type"])
+    if model_type in MODEL_REGISTRY:
+        _, defaults = MODEL_REGISTRY[model_type]
+        default_model_name = defaults.get("model_name_or_path")
+        if default_model_name:
+            names.add(str(default_model_name))
+        names.add(model_type)
+    return names
+
+
 def slice_embeddings(
     embeddings: dict[str, np.ndarray],
     max_texts: int | None,
@@ -328,6 +543,12 @@ def slice_embeddings(
         language: language_embeddings[:max_texts]
         for language, language_embeddings in embeddings.items()
     }
+
+
+def slice_embedding_array(embeddings: np.ndarray, max_texts: int | None) -> np.ndarray:
+    if max_texts is None:
+        return embeddings
+    return embeddings[:max_texts]
 
 
 def compute_metric(
@@ -435,6 +656,29 @@ def embedding_cache_path(metadata: dict[str, Any]) -> Path:
         key[:16],
     ])
     return project_datadir() / "embeddings" / f"{name}.npz"
+
+
+def default_monolingual_reference_model(language: str) -> Path:
+    return (
+        project_datadir()
+        / "training"
+        / "monolingual"
+        / "checkpoints"
+        / "monolingual_tokenizer"
+        / language
+    )
+
+
+def resolve_reference_dataset_language(
+    dataset_name: str,
+    reference_language: str,
+    override: str | None,
+) -> str:
+    if override:
+        return override
+    if dataset_name == "wmt24pp" and reference_language == "eng_Latn":
+        return "en"
+    return reference_language
 
 
 def project_datadir() -> Path:

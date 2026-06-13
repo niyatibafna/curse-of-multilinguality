@@ -198,6 +198,65 @@ class Comness(COMMetric):
         return n * (n - 1) // 2
 
 
+class EffLangspaceDimProp(COMMetric):
+    """
+    Fraction of total displacement effective dimension used by language variation.
+    """
+
+    def compute(self) -> dict[str, Any]:
+        X = stack_language_embeddings(
+            self.X,
+            self.num_concepts,
+            self.num_languages,
+            self.embedding_dim,
+        )
+        if self.normalize:
+            X = self._normalize_embeddings(X)
+
+        d_lang = self._language_effective_rank(X)
+        d_total = self._total_effective_rank(X)
+        score = None
+        if d_total > np.finfo(float).eps:
+            score = d_lang / d_total
+
+        return {
+            "score": score,
+            "d_lang": d_lang,
+            "d_total": d_total,
+            "num_language_displacements": self.num_concepts * self._num_pairs(self.num_languages),
+            "num_total_displacements": self._num_pairs(self.num_concepts * self.num_languages),
+            "num_languages": self.num_languages,
+            "num_concepts": self.num_concepts,
+            "embedding_dim": self.embedding_dim,
+            "languages": list(self.X.keys()),
+            "effective_rank_method": self.kwargs.get("effective_rank_method", "stable"),
+            "normalize": self.normalize,
+        }
+
+    def _normalize_embeddings(self, X: np.ndarray) -> np.ndarray:
+        norms = np.linalg.norm(X, axis=-1, keepdims=True)
+        return X / np.clip(norms, a_min=np.finfo(float).eps, a_max=None)
+
+    def _language_effective_rank(self, X: np.ndarray) -> float:
+        if self.num_languages < 2:
+            raise ValueError("Language displacements require at least two languages.")
+        return pairwise_displacement_effective_rank(
+            (X[:, c, :] for c in range(self.num_concepts)),
+            embedding_dim=self.embedding_dim,
+            **self._effective_rank_kwargs(),
+        )
+
+    def _total_effective_rank(self, X: np.ndarray) -> float:
+        return pairwise_displacement_effective_rank(
+            [X.reshape(-1, self.embedding_dim)],
+            embedding_dim=self.embedding_dim,
+            **self._effective_rank_kwargs(),
+        )
+
+    def _num_pairs(self, n: int) -> int:
+        return n * (n - 1) // 2
+
+
 class ConceptLanguagePrincipalAngleOverlap(COMMetric):
     """Principal-angle overlap between concept and language displacement subspaces."""
 

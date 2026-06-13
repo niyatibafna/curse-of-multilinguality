@@ -8,11 +8,17 @@ from .language_subspace_dimensionality import (
     LanguageSpaceDimGrowthByLanguage,
     LanguageSpaceGrowthByConcepts,
 )
-from .multilinguality_conditions import AlignmentCondition, MonolingualStructureCondition
+from .multilinguality_conditions import (
+    AlignmentCondition,
+    MonolingualStructureCondition,
+    NearestNeighborOverlapAgainstMonolingual,
+    RmseAgainstMonolingual,
+)
 from .metrics import COMMetric  
 from .interaction_between_concept_and_language import (
     Comness,
     ConceptLanguagePrincipalAngleOverlap,
+    EffLangspaceDimProp,
 )
 
 __all__ = [
@@ -23,8 +29,11 @@ __all__ = [
     "ConceptLanguagePrincipalAngleOverlap",
     "ConceptSpaceDimGrowthByConcept",
     "ConceptSpaceDimGrowthByLanguage",
+    "EffLangspaceDimProp",
     "IndividualLanguageConceptDimensionality",
     "LanguageSpaceDimGrowthByLanguage",
     "LanguageSpaceGrowthByConcepts",
     "MonolingualStructureCondition",
+    "NearestNeighborOverlapAgainstMonolingual",
+    "RmseAgainstMonolingual",
 ]
