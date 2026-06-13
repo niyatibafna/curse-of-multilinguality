@@ -25,3 +25,27 @@ Refresh the local count snapshot with one Wikistats download:
 ```bash
 python src/utils/language_sorting/update_wiki_counts.py
 ```
+
+## Sort Languages by MADLAD Resource Size
+
+```bash
+python src/utils/language_sorting/sort_by_madlad_resource.py --dataset floresplus --quiet > sorted_langs.csv
+python src/utils/language_sorting/sort_by_madlad_resource.py langs.txt --key clean_docs > sorted_langs.csv
+python src/utils/language_sorting/sort_by_madlad_resource.py --all-madlad > madlad_langs_by_clean_bytes.csv
+```
+
+Defaults:
+
+- `language_to_madlad.csv`: editable benchmark-code to MADLAD-code mapping.
+- `madlad_counts.csv`: normalized counts parsed from the MADLAD dataset-card
+  final table.
+
+The default sort key is `clean_bytes`. Other keys include `clean_docs`,
+`clean_sents`, `clean_tokens`, `clean_chars`, and the corresponding `noisy_*`
+columns.
+
+Refresh the local MADLAD count snapshot from the dataset-card table:
+
+```bash
+python src/utils/language_sorting/update_madlad_counts.py
+```
