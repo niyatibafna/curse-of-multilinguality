@@ -428,13 +428,23 @@ deficit_job=$(sbatch --parsable --dependency=afterok:${data_job} slurm_scripts/t
 manifest_job=$(sbatch --parsable --dependency=afterok:${deficit_job} slurm_scripts/training_make_eval_manifest_<version>.sbatch)
 train_job=$(sbatch --parsable --dependency=afterok:${manifest_job} slurm_scripts/training_train_mlm_per_group_tokenizers.sbatch)
 warm_job=$(sbatch --parsable --dependency=afterok:${train_job} slurm_scripts/training_warm_embeddings_<version>.sbatch)
-eval_job=$(sbatch --parsable --dependency=afterok:${warm_job} slurm_scripts/training_eval_metrics_<version>.sbatch)
+eval_output=$(
+  python -m src.training.submit_eval_array \
+    --manifest_path "$DATADIR/projects/curse-of-multilinguality/training/eval_manifest_<version>.json" \
+    --eval_script slurm_scripts/training_eval_metrics_<version>.sbatch \
+    --plot_script slurm_scripts/training_plot_<version>.sbatch \
+    --dependency afterok:${warm_job}
+)
+eval_job=$(printf "%s\n" "$eval_output" | awk -F= '/^eval_job=/{print $2}')
 ```
 
 Array conventions:
 
 - CPU arrays: no concurrency cap.
 - GPU arrays: use `%10`.
+- Eval metric arrays: submit with `src.training.submit_eval_array`; it reads
+  `len(eval_manifest["entries"])` and passes the correct `--array` range to
+  `sbatch`.
 - The generic per-group-tokenizer templates have `#SBATCH --array=0-10`; edit
   the upper bound if `SIZES_CSV` has a different number of groups.
 - Logs: `/weka/home/nbafna1/projects/curse-of-multilinguality/slurm_logs/%x/%A_%a.out`

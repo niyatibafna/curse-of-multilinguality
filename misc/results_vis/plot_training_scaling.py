@@ -4,6 +4,7 @@ import argparse
 import csv
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +14,12 @@ import matplotlib.pyplot as plt
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+sys_path = str(PROJECT_ROOT)
+if sys_path not in sys.path:
+    sys.path.insert(0, sys_path)
+
+from src.training.check_eval_outputs import missing_outputs
+
 DEFAULT_INPUT_DIR = PROJECT_ROOT / "outputs" / "training_scaling"
 DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parent / "plots" / "scaling"
 
@@ -23,7 +30,19 @@ def main() -> None:
     parser.add_argument("--output_dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--formats", nargs="+", default=["png"], choices=["png", "pdf", "svg"])
     parser.add_argument("--metrics")
+    parser.add_argument("--manifest_path", type=Path)
+    parser.add_argument("--allow_partial", action="store_true")
     args = parser.parse_args()
+
+    if args.manifest_path and not args.allow_partial:
+        missing = missing_outputs(args.manifest_path, args.input_dir)
+        if missing:
+            preview = "\n".join(
+                f"index={row['index']} {row['strategy']} {row['subset']} "
+                f"{row['dataset']} {row['metric']}"
+                for row in missing[:20]
+            )
+            raise RuntimeError(f"Refusing to plot incomplete eval outputs: {len(missing)} missing.\n{preview}")
 
     rows = load_rows(args.input_dir)
     if args.metrics:
