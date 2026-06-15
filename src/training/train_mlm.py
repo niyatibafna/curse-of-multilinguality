@@ -87,7 +87,7 @@ def main(
         seed=seed,
         fp16=fp16,
         report_to="none",
-        save_total_limit=2,
+        save_total_limit=1,
     )
     trainer = Trainer(
         model=model,
