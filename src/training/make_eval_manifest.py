@@ -34,6 +34,8 @@ MIN_LANGUAGES = {
     "nearest_neighbor_overlap_against_monolingual": 1,
     "nearest_neighbor_overlap_against_monolingual_5": 1,
     "nearest_neighbor_overlap_against_monolingual_10": 1,
+    "nearest_neighbor_overlap_against_monolingual_20": 1,
+    "nearest_neighbor_overlap_against_monolingual_50": 1,
     "rmse_against_monolingual": 1,
 }
 

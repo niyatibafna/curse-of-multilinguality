@@ -52,6 +52,8 @@ METRICS = {
     "nearest_neighbor_overlap_against_monolingual": NearestNeighborOverlapAgainstMonolingual,
     "nearest_neighbor_overlap_against_monolingual_5": NearestNeighborOverlapAgainstMonolingual,
     "nearest_neighbor_overlap_against_monolingual_10": NearestNeighborOverlapAgainstMonolingual,
+    "nearest_neighbor_overlap_against_monolingual_20": NearestNeighborOverlapAgainstMonolingual,
+    "nearest_neighbor_overlap_against_monolingual_50": NearestNeighborOverlapAgainstMonolingual,
     "rmse_against_monolingual": RmseAgainstMonolingual,
 }
 
@@ -59,6 +61,8 @@ REFERENCE_METRICS = {
     "nearest_neighbor_overlap_against_monolingual",
     "nearest_neighbor_overlap_against_monolingual_5",
     "nearest_neighbor_overlap_against_monolingual_10",
+    "nearest_neighbor_overlap_against_monolingual_20",
+    "nearest_neighbor_overlap_against_monolingual_50",
     "rmse_against_monolingual",
 }
 
@@ -69,6 +73,8 @@ METRIC_DEFAULT_KWARGS = {
     "concept_language_principal_angle_overlap_90": {"subspace_energy_threshold": 0.9},
     "nearest_neighbor_overlap_against_monolingual_5": {"nearest_neighbor_k": 5},
     "nearest_neighbor_overlap_against_monolingual_10": {"nearest_neighbor_k": 10},
+    "nearest_neighbor_overlap_against_monolingual_20": {"nearest_neighbor_k": 20},
+    "nearest_neighbor_overlap_against_monolingual_50": {"nearest_neighbor_k": 50},
 }
 
 DEFAULT_POOLING = {

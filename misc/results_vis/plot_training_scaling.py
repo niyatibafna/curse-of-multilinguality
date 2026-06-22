@@ -160,6 +160,8 @@ def extract_value(payload: dict[str, Any]) -> float | None:
         "nearest_neighbor_overlap_against_monolingual": "score",
         "nearest_neighbor_overlap_against_monolingual_5": "score",
         "nearest_neighbor_overlap_against_monolingual_10": "score",
+        "nearest_neighbor_overlap_against_monolingual_20": "score",
+        "nearest_neighbor_overlap_against_monolingual_50": "score",
         "rmse_against_monolingual": "score",
     }
     if metric == "concept_space_dim_growth_by_language":

@@ -369,6 +369,32 @@ number_of_model_sizes x number_of_eval_datasets
 ## Step 10: Metric Evaluation
 
 Metric jobs read the eval manifest and write JSON to `outputs/`.
+Do not hardcode the metric array size in the sbatch file. Submit metric evals
+with `src.training.submit_eval_array`, which reads the manifest and passes the
+correct `--array=0-N` range to `sbatch`.
+
+```bash
+python -m src.training.submit_eval_array \
+  --manifest_path "$DATADIR/projects/curse-of-multilinguality/training/eval_manifest_<version>.json" \
+  --eval_script slurm_scripts/training_eval_metrics_<version>.sbatch \
+  --plot_script slurm_scripts/training_plot_<version>.sbatch \
+  --dependency afterok:<warmup_job_id>
+```
+
+The helper prints:
+
+```text
+eval_job=<slurm_id>
+eval_array=0-<len(entries)-1>
+eval_entries=<len(entries)>
+plot_job=<slurm_id>
+```
+
+The eval sbatch script itself should not contain a `#SBATCH --array=...` line.
+The array range comes from the submit helper. For testing without submitting,
+add `--dry_run`.
+
+Each array task runs one manifest entry:
 
 ```bash
 python -m src.training.run_eval_manifest_entry \
@@ -383,7 +409,13 @@ python -m src.training.run_eval_manifest_entry \
   --alignment_batch_size 64
 ```
 
-The metric array size should match `len(eval_manifest["entries"])`.
+To audit completion manually:
+
+```bash
+python -m src.training.check_eval_outputs \
+  --manifest_path "$DATADIR/projects/curse-of-multilinguality/training/eval_manifest_<version>.json" \
+  --output_dir outputs/training_scaling_<version>
+```
 
 ## Step 11: Plotting
 
@@ -401,8 +433,13 @@ Metric scaling:
 conda run -n genspace python misc/results_vis/plot_training_scaling.py \
   --input_dir outputs/training_scaling_<version> \
   --output_dir misc/results_vis/plots/scaling_<version> \
+  --manifest_path "$DATADIR/projects/curse-of-multilinguality/training/eval_manifest_<version>.json" \
   --formats png pdf
 ```
+
+By default, the scaling plotter refuses to run if any manifest entry is missing
+its expected metric JSON. Use `--allow_partial` only for explicitly preliminary
+plots.
 
 The scaling plotter writes:
 
@@ -436,6 +473,8 @@ eval_output=$(
     --dependency afterok:${warm_job}
 )
 eval_job=$(printf "%s\n" "$eval_output" | awk -F= '/^eval_job=/{print $2}')
+plot_job=$(printf "%s\n" "$eval_output" | awk -F= '/^plot_job=/{print $2}')
+printf "%s\n" "$eval_output"
 ```
 
 Array conventions:
