@@ -95,6 +95,8 @@ Registry keys in `src/models/registry.py`:
 - `bge-base`: `BAAI/bge-base-en-v1.5`
 - `e5-base`: `intfloat/e5-base-v2`
 - `e5-large`: `intfloat/e5-large-v2`
+- `multilingual-e5-large`: `intfloat/multilingual-e5-large`
+- `jina-v4`: `jinaai/jina-embeddings-v4`
 - `nomic`: `nomic-ai/nomic-embed-text-v1.5`
 
 Use `--model_type` to run an arbitrary model path with an existing wrapper, for
