@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import math
 import os
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,7 @@ os.environ.setdefault("MPLCONFIGDIR", "/tmp/matplotlib-cache")
 
 import matplotlib.pyplot as plt
 
+from metric_display import display_metric_label, extract_metric_value, metric_sort_key, sorted_metrics
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_INPUT_DIR = PROJECT_ROOT / "outputs"
@@ -43,8 +45,8 @@ def load_results(input_dir: Path) -> list[dict[str, Any]]:
         with path.open() as handle:
             payload = json.load(handle)
 
-        result = payload.get("result")
-        if not isinstance(result, (int, float)):
+        value = extract_metric_value(payload)
+        if value is None:
             continue
 
         rows.append(
@@ -52,7 +54,7 @@ def load_results(input_dir: Path) -> list[dict[str, Any]]:
                 "model": str(payload.get("model") or path.parents[1].name),
                 "dataset": str(payload.get("dataset") or path.parent.name),
                 "metric": str(payload.get("metric") or path.stem),
-                "value": float(result),
+                "value": value,
             }
         )
     return rows
@@ -67,7 +69,7 @@ def write_summary(rows: list[dict[str, Any]], path: Path) -> None:
 
 def plot_by_dataset_metric(rows: list[dict[str, Any]], output_dir: Path, formats: list[str]) -> None:
     datasets = sorted({row["dataset"] for row in rows})
-    metrics = sorted({row["metric"] for row in rows})
+    metrics = sorted_metrics({row["metric"] for row in rows})
 
     for dataset in datasets:
         for metric in metrics:
@@ -81,9 +83,9 @@ def plot_by_dataset_metric(rows: list[dict[str, Any]], output_dir: Path, formats
             plot_bars(
                 labels=[row["model"] for row in subset],
                 values=[row["value"] for row in subset],
-                title=f"{pretty(metric)} on {pretty(dataset)}",
+                title=f"{display_metric_label(metric)} on {pretty(dataset)}",
                 xlabel="Model",
-                ylabel=pretty(metric),
+                ylabel=display_metric_label(metric),
                 output_base=metric_dir(output_dir, metric) / f"{dataset}__by_model",
                 formats=formats,
             )
@@ -91,7 +93,7 @@ def plot_by_dataset_metric(rows: list[dict[str, Any]], output_dir: Path, formats
 
 def plot_by_model_metric(rows: list[dict[str, Any]], output_dir: Path, formats: list[str]) -> None:
     models = sorted({row["model"] for row in rows})
-    metrics = sorted({row["metric"] for row in rows})
+    metrics = sorted_metrics({row["metric"] for row in rows})
 
     for model in models:
         for metric in metrics:
@@ -104,9 +106,9 @@ def plot_by_model_metric(rows: list[dict[str, Any]], output_dir: Path, formats: 
             plot_bars(
                 labels=[row["dataset"] for row in subset],
                 values=[row["value"] for row in subset],
-                title=f"{pretty(metric)} for {model}",
+                title=f"{display_metric_label(metric)} for {model}",
                 xlabel="Dataset",
-                ylabel=pretty(metric),
+                ylabel=display_metric_label(metric),
                 output_base=metric_dir(output_dir, metric) / "detailed_plots" / f"{slugify(model)}__by_dataset",
                 formats=formats,
             )
@@ -114,7 +116,7 @@ def plot_by_model_metric(rows: list[dict[str, Any]], output_dir: Path, formats: 
 
 def plot_dataset_metric_grids(rows: list[dict[str, Any]], output_dir: Path, formats: list[str]) -> None:
     datasets = sorted({row["dataset"] for row in rows})
-    metrics = sorted({row["metric"] for row in rows})
+    metrics = sorted_metrics({row["metric"] for row in rows})
 
     for metric in metrics:
         fig, axes = plt.subplots(1, len(datasets), figsize=(max(5 * len(datasets), 8), 4.5), squeeze=False)
@@ -127,45 +129,58 @@ def plot_dataset_metric_grids(rows: list[dict[str, Any]], output_dir: Path, form
             ax.bar([row["model"] for row in subset], [row["value"] for row in subset], color="#4C78A8")
             ax.set_title(pretty(dataset))
             ax.set_xlabel("Model")
-            ax.set_ylabel(pretty(metric))
+            ax.set_ylabel(display_metric_label(metric))
             ax.tick_params(axis="x", labelrotation=45)
             for tick in ax.get_xticklabels():
                 tick.set_horizontalalignment("right")
             add_value_labels(ax)
-        fig.suptitle(pretty(metric))
+        fig.suptitle(display_metric_label(metric))
         fig.tight_layout()
         save_figure(fig, metric_dir(output_dir, metric) / "all_datasets__by_model", formats)
 
 
 def plot_all_metrics(rows: list[dict[str, Any]], output_dir: Path, formats: list[str]) -> None:
-    metrics = sorted({row["metric"] for row in rows})
+    metrics = sorted_metrics({row["metric"] for row in rows})
     if len(metrics) < 2:
         return
 
     datasets = sorted({row["dataset"] for row in rows})
     models = sorted({row["model"] for row in rows})
+    ncols = min(4, len(metrics))
+    metric_blocks = math.ceil(len(metrics) / ncols)
+    nrows = len(datasets) * metric_blocks
     fig, axes = plt.subplots(
-        len(datasets),
-        len(metrics),
-        figsize=(max(5 * len(metrics), 8), max(3.5 * len(datasets), 4)),
+        nrows,
+        ncols,
+        figsize=(max(4.8 * ncols, 10), max(3.4 * nrows, 4.5)),
         squeeze=False,
     )
 
     values = {(row["dataset"], row["metric"], row["model"]): row["value"] for row in rows}
-    for row_index, dataset in enumerate(datasets):
-        for col_index, metric in enumerate(metrics):
+    used_axes = set()
+    for dataset_index, dataset in enumerate(datasets):
+        for metric_index, metric in enumerate(metrics):
+            row_index = dataset_index * metric_blocks + metric_index // ncols
+            col_index = metric_index % ncols
+            used_axes.add((row_index, col_index))
             ax = axes[row_index][col_index]
             labels = [model for model in models if (dataset, metric, model) in values]
             y = [values[(dataset, metric, model)] for model in labels]
             ax.bar(labels, y, color="#4C78A8")
-            ax.set_title(f"{pretty(dataset)}: {pretty(metric)}")
-            ax.set_ylabel(pretty(metric))
+            ax.set_title(f"{pretty(dataset)}\n{display_metric_label(metric)}", fontsize=10)
+            ax.set_ylabel(display_metric_label(metric), fontsize=9)
             ax.tick_params(axis="x", labelrotation=45)
             for tick in ax.get_xticklabels():
                 tick.set_horizontalalignment("right")
             add_value_labels(ax)
 
-    fig.tight_layout()
+    for row_index, axis_row in enumerate(axes):
+        for col_index, ax in enumerate(axis_row):
+            if (row_index, col_index) not in used_axes:
+                ax.axis("off")
+
+    fig.suptitle("Metric Overview", y=0.995)
+    fig.tight_layout(rect=(0, 0, 1, 0.985))
     save_figure(fig, metric_dir(output_dir, "all_metrics") / "all_datasets__all_metrics", formats)
 
 
@@ -220,7 +235,8 @@ def metric_dir(output_dir: Path, metric: str) -> Path:
 
 
 def row_key(row: dict[str, Any]) -> tuple[str, str, str]:
-    return row["dataset"], row["metric"], row["model"]
+    group, order, name = metric_sort_key(row["metric"])
+    return row["dataset"], f"{group:02d}-{order:02d}-{name}", row["model"]
 
 
 def pretty(value: str) -> str:

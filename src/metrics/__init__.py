@@ -15,6 +15,8 @@ from .multilinguality_conditions import (
     RmseAgainstMonolingual,
 )
 from .metrics import COMMetric  
+from .extrinsic import MaskedLanguageModelLoss
+from .noncollapse import Noncollapse
 from .interaction_between_concept_and_language import (
     Comness,
     ConceptLanguagePrincipalAngleOverlap,
@@ -33,7 +35,9 @@ __all__ = [
     "IndividualLanguageConceptDimensionality",
     "LanguageSpaceDimGrowthByLanguage",
     "LanguageSpaceGrowthByConcepts",
+    "MaskedLanguageModelLoss",
     "MonolingualStructureCondition",
     "NearestNeighborOverlapAgainstMonolingual",
+    "Noncollapse",
     "RmseAgainstMonolingual",
 ]
