@@ -480,7 +480,7 @@ printf "%s\n" "$eval_output"
 Array conventions:
 
 - CPU arrays: no concurrency cap.
-- GPU arrays: use `%10`.
+- GPU arrays: use `%18`.
 - Eval metric arrays: submit with `src.training.submit_eval_array`; it reads
   `len(eval_manifest["entries"])` and passes the correct `--array` range to
   `sbatch`.
@@ -582,6 +582,52 @@ These are completed or queued examples, not defaults for future lanes.
   - Artifacts use `corpora_v8/seed<k>/fixed_500m_balanced/n<size>`,
     `tokenizers/bert_wordpiece_50000_v8/n<size>`, and
     `checkpoints_v8/seed<k>/fixed_500m_balanced/n<size>`.
+- v9:
+  - Additive 50M/language lane using the same clean-byte ordered language groups
+    and five seeds as v7/v8.
+  - Total tokens scale with group size: `n2=100M`, `n10=500M`,
+    `n50=2.5B`, `n100=5B`.
+  - The prepare job regenerates the language plan with `make_language_plan.py`
+    and fails if the generated ordered languages/subsets differ from the
+    canonical v7/v8 clean-byte plan.
+  - Trains one tokenizer per language group and reuses it across seeds. The
+    tokenizer corpus is counted with the matching v8 group tokenizer.
+  - Artifacts use `corpora_v9/seed<k>/additive_50m/n<size>`,
+    `tokenizers/bert_wordpiece_50000_v9/n<size>`, and
+    `checkpoints_v9/seed<k>/additive_50m/n<size>`.
+- v10:
+  - Additive 10M/language lane, otherwise matching v9.
+  - Total tokens scale with group size: `n2=20M`, `n10=100M`,
+    `n50=500M`, `n100=1B`.
+  - Uses the same regenerated-and-compared clean-byte language plan check as
+    v9, matching the v7/v8 canonical language groups.
+  - Trains one tokenizer per language group and reuses it across seeds. The
+    tokenizer corpus is counted with the matching v8 group tokenizer.
+  - Artifacts use `corpora_v10/seed<k>/additive_10m/n<size>`,
+    `tokenizers/bert_wordpiece_50000_v10/n<size>`, and
+    `checkpoints_v10/seed<k>/additive_10m/n<size>`.
+- v11:
+  - Additive resource-proportional lane using the same clean-byte ordered
+    language groups and five seeds as v7/v8/v9/v10.
+  - Per-language targets are stable across groups:
+    `max(10K, 50M * clean_bytes(language) / max_clean_bytes_in_plan)`.
+    This keeps repeated-language samples mostly identical across groups, with
+    only cutoff differences from tokenizer counting.
+  - The prepare job writes
+    `token_targets_v11_clean_bytes_max50m_floor10k.json` with
+    `make_resource_token_targets.py --max_tokens_per_language 50000000`.
+  - Trains one tokenizer per language group and reuses it across seeds. The
+    tokenizer corpus is counted with the matching v8 group tokenizer.
+  - Artifacts use `corpora_v11/seed<k>/additive_resource_max50m/n<size>`,
+    `tokenizers/bert_wordpiece_50000_v11/n<size>`, and
+    `checkpoints_v11/seed<k>/additive_resource_max50m/n<size>`.
+- v12:
+  - Same as v11, but with a 500M max-language token cap instead of 50M.
+  - Per-language targets are
+    `max(10K, 500M * clean_bytes(language) / max_clean_bytes_in_plan)`.
+  - Artifacts use `corpora_v12/seed<k>/additive_resource_max500m/n<size>`,
+    `tokenizers/bert_wordpiece_50000_v12/n<size>`, and
+    `checkpoints_v12/seed<k>/additive_resource_max500m/n<size>`.
 
 ## Environment Notes
 

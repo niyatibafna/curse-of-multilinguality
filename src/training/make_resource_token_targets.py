@@ -17,11 +17,25 @@ def main(
     output_path: str | None = None,
     total_tokens: int = 500_000_000,
     floor_tokens_per_language: int = 10_000,
+    max_tokens_per_language: int | None = None,
     sizes: str | None = None,
 ) -> None:
     plan = read_json(language_plan_path)
     clean_bytes = read_clean_bytes(clean_bytes_path)
     requested_sizes = parse_sizes(sizes) if sizes else subset_sizes(plan)
+    reference_languages = list(plan.get("languages") or [])
+    if not reference_languages:
+        seen = set()
+        reference_languages = []
+        for size in requested_sizes:
+            for language in plan["subsets"][f"n{size}"]:
+                if language not in seen:
+                    seen.add(language)
+                    reference_languages.append(language)
+    missing_reference = [language for language in reference_languages if language not in clean_bytes]
+    if missing_reference:
+        raise ValueError(f"Missing clean bytes for reference languages: {missing_reference}")
+    reference_max_clean_bytes = max(clean_bytes[language] for language in reference_languages)
     subsets: dict[str, dict[str, int]] = {}
     missing: dict[str, list[str]] = {}
     for size in requested_sizes:
@@ -31,18 +45,30 @@ def main(
         if missing_languages:
             missing[subset] = missing_languages
             raise ValueError(f"Missing clean bytes for {subset}: {missing_languages}")
-        subsets[subset] = allocate_targets(
-            languages=languages,
-            clean_bytes=clean_bytes,
-            total_tokens=total_tokens,
-            floor_tokens_per_language=floor_tokens_per_language,
-        )
+        if max_tokens_per_language is not None:
+            subsets[subset] = allocate_targets_by_global_max(
+                languages=languages,
+                clean_bytes=clean_bytes,
+                reference_max_clean_bytes=reference_max_clean_bytes,
+                max_tokens_per_language=max_tokens_per_language,
+                floor_tokens_per_language=floor_tokens_per_language,
+            )
+        else:
+            subsets[subset] = allocate_targets(
+                languages=languages,
+                clean_bytes=clean_bytes,
+                total_tokens=total_tokens,
+                floor_tokens_per_language=floor_tokens_per_language,
+            )
 
     payload: dict[str, Any] = {
         "language_plan_path": language_plan_path,
         "clean_bytes_path": clean_bytes_path,
+        "target_mode": "resource_global_max" if max_tokens_per_language is not None else "fixed_total_resource",
         "total_tokens": total_tokens,
+        "max_tokens_per_language": max_tokens_per_language,
         "floor_tokens_per_language": floor_tokens_per_language,
+        "reference_max_clean_bytes": reference_max_clean_bytes,
         "sizes": requested_sizes,
         "missing_clean_bytes": missing,
         "subsets": subsets,
@@ -110,6 +136,22 @@ def allocate_equal(languages: list[str], total_tokens: int) -> dict[str, int]:
     }
 
 
+def allocate_targets_by_global_max(
+    languages: list[str],
+    clean_bytes: dict[str, int],
+    reference_max_clean_bytes: int,
+    max_tokens_per_language: int,
+    floor_tokens_per_language: int,
+) -> dict[str, int]:
+    if reference_max_clean_bytes <= 0:
+        return {language: floor_tokens_per_language for language in languages}
+    targets = {}
+    for language in languages:
+        proportional = round(max_tokens_per_language * clean_bytes[language] / reference_max_clean_bytes)
+        targets[language] = max(floor_tokens_per_language, int(proportional))
+    return targets
+
+
 if __name__ == "__main__":
     import argparse
 
@@ -119,5 +161,6 @@ if __name__ == "__main__":
     parser.add_argument("--output_path")
     parser.add_argument("--total_tokens", type=int, default=500_000_000)
     parser.add_argument("--floor_tokens_per_language", type=int, default=10_000)
+    parser.add_argument("--max_tokens_per_language", type=int)
     parser.add_argument("--sizes")
     main(**vars(parser.parse_args()))
