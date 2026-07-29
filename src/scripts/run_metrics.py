@@ -26,8 +26,10 @@ from src.metrics import (
     IndividualLanguageConceptDimensionality,
     LanguageSpaceDimGrowthByLanguage,
     LanguageSpaceGrowthByConcepts,
+    MaskedLanguageModelLoss,
     MonolingualStructureCondition,
     NearestNeighborOverlapAgainstMonolingual,
+    Noncollapse,
     RmseAgainstMonolingual,
 )
 from src.models import MODEL_REGISTRY, EmbeddingModel, load_model
@@ -48,12 +50,14 @@ METRICS = {
     "individual_concept_dimensionality": IndividualLanguageConceptDimensionality,
     "language_space_dim_growth_by_language": LanguageSpaceDimGrowthByLanguage,
     "language_space_growth_by_concepts": LanguageSpaceGrowthByConcepts,
+    "mlm_loss": MaskedLanguageModelLoss,
     "monolingual_structure_condition": MonolingualStructureCondition,
     "nearest_neighbor_overlap_against_monolingual": NearestNeighborOverlapAgainstMonolingual,
     "nearest_neighbor_overlap_against_monolingual_5": NearestNeighborOverlapAgainstMonolingual,
     "nearest_neighbor_overlap_against_monolingual_10": NearestNeighborOverlapAgainstMonolingual,
     "nearest_neighbor_overlap_against_monolingual_20": NearestNeighborOverlapAgainstMonolingual,
     "nearest_neighbor_overlap_against_monolingual_50": NearestNeighborOverlapAgainstMonolingual,
+    "noncollapse": Noncollapse,
     "rmse_against_monolingual": RmseAgainstMonolingual,
 }
 
@@ -78,7 +82,10 @@ METRIC_DEFAULT_KWARGS = {
 }
 
 DEFAULT_POOLING = {
+    "bge-m3": "model_default",
+    "jina-v4": "model_default",
     "mbert": "cls",
+    "multilingual-e5-large": "model_default",
 }
 
 
@@ -110,6 +117,10 @@ def main(
     monolingual_reference_model_type: str = "mbert",
     monolingual_reference_pooling: str | None = None,
     monolingual_reference_neighbor_k: int | None = None,
+    max_seq_length: int = 128,
+    mlm_probability: float = 0.15,
+    mask_seed: int = 0,
+    fp16: bool = True,
 ) -> None:
     models = as_list(models)
     model_aliases = as_list(model_aliases)
@@ -121,10 +132,12 @@ def main(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    if model_type is None:
+    embedding_metric_names = [metric for metric in metrics if metric != "mlm_loss"]
+    if model_type is None and embedding_metric_names:
         validate_choices("models", models, MODEL_REGISTRY)
     else:
-        validate_choices("model_type", [model_type], MODEL_REGISTRY)
+        if model_type is not None:
+            validate_choices("model_type", [model_type], MODEL_REGISTRY)
     if model_aliases is not None and len(model_aliases) != len(models):
         raise ValueError("--model_aliases must have the same length as --models.")
     if dataset_splits is not None and len(dataset_splits) != len(datasets):
@@ -185,6 +198,44 @@ def main(
             if model_type is not None:
                 model_kwargs["model_name_or_path"] = model_name
 
+            if "mlm_loss" in metrics:
+                log(f"computing metric=mlm_loss model={model_name} dataset={dataset_name}")
+                mlm_texts = texts[:max_texts] if max_texts is not None else texts
+                result = compute_mlm_loss(
+                    model_name_or_path=model_name,
+                    texts=mlm_texts,
+                    languages=languages,
+                    device=device,
+                    batch_size=batch_size,
+                    max_seq_length=max_seq_length,
+                    mlm_probability=mlm_probability,
+                    mask_seed=mask_seed,
+                    fp16=fp16,
+                )
+                output_path = output_file(output_dir, output_model_name, dataset_name, "mlm_loss")
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                write_json(
+                    output_path,
+                    {
+                        "model": output_model_name,
+                        "model_path": model_name,
+                        "model_type": model_key,
+                        "dataset": dataset_name,
+                        "metric": "mlm_loss",
+                        "result": result,
+                        "split": dataset_split,
+                        "languages": len(languages),
+                        "language_names": languages,
+                        "num_texts": len(mlm_texts),
+                        "num_cached_concepts": len(texts),
+                    },
+                )
+                log(f"wrote {output_path}")
+
+            embedding_metrics = [metric for metric in metrics if metric != "mlm_loss"]
+            if not embedding_metrics:
+                continue
+
             cache_metadata = embedding_cache_metadata(
                 model_name=model_name,
                 model_type=model_key,
@@ -237,7 +288,7 @@ def main(
                     f"of {len(next(iter(embeddings.values())))} cached concepts"
                 )
 
-            for metric_name in metrics:
+            for metric_name in embedding_metrics:
                 log(f"computing metric={metric_name} model={model_name} dataset={dataset_name}")
                 extra_metric_kwargs = {
                     "random_baseline_trials": random_baseline_trials,
@@ -581,6 +632,34 @@ def compute_metric(
     return to_jsonable(metric.compute())
 
 
+def compute_mlm_loss(
+    model_name_or_path: str,
+    texts: list[dict[str, Any]],
+    languages: list[str],
+    device: str | None,
+    batch_size: int,
+    max_seq_length: int,
+    mlm_probability: float,
+    mask_seed: int,
+    fp16: bool,
+) -> Any:
+    texts_by_language = {
+        language: [row["data"][language] for row in texts]
+        for language in languages
+    }
+    metric = MaskedLanguageModelLoss(
+        model_name_or_path=model_name_or_path,
+        texts_by_language=texts_by_language,
+        device=device,
+        batch_size=batch_size,
+        max_seq_length=max_seq_length,
+        mlm_probability=mlm_probability,
+        mask_seed=mask_seed,
+        fp16=fp16,
+    )
+    return to_jsonable(metric.compute())
+
+
 def as_list(value: str | list[str] | tuple[str, ...] | None) -> list[str] | None:
     if value is None:
         return None
@@ -774,7 +853,10 @@ def as_numpy(value: Any) -> np.ndarray:
     if isinstance(value, np.ndarray):
         return value
     if hasattr(value, "detach"):
-        return value.detach().cpu().numpy()
+        value = value.detach().cpu()
+        if str(value.dtype) == "torch.bfloat16":
+            value = value.float()
+        return value.numpy()
     return np.asarray(value)
 
 
