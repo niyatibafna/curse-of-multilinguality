@@ -24,6 +24,7 @@ class MBertEmbeddingModel(EmbeddingModel):
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.tokenizer = AutoTokenizer.from_pretrained(model_name_or_path)
         self.model = AutoModel.from_pretrained(model_name_or_path, **model_kwargs).to(self.device)
+        self.max_length = getattr(self.model.config, "max_position_embeddings", None)
         self.model.eval()
 
     def encode(
@@ -43,6 +44,7 @@ class MBertEmbeddingModel(EmbeddingModel):
                 batch,
                 padding=True,
                 truncation=True,
+                max_length=self.max_length,
                 return_tensors="pt",
                 **tokenizer_kwargs,
             )

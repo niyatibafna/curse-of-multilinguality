@@ -13,6 +13,7 @@ class SentenceTransformerEmbeddingModel(EmbeddingModel):
         normalize_embeddings: bool = False,
         prefix: str = "",
         trust_remote_code: bool = False,
+        default_encode_kwargs: dict[str, Any] | None = None,
         **model_kwargs: Any,
     ):
         try:
@@ -25,6 +26,7 @@ class SentenceTransformerEmbeddingModel(EmbeddingModel):
         model_kwargs.pop("layer", None)
         self.normalize_embeddings = normalize_embeddings
         self.prefix = prefix
+        self.default_encode_kwargs = default_encode_kwargs or {}
         if trust_remote_code:
             model_kwargs["trust_remote_code"] = True
 
@@ -41,7 +43,9 @@ class SentenceTransformerEmbeddingModel(EmbeddingModel):
 
         if self.prefix:
             inputs = [self.prefix + text for text in inputs]
+        inputs = [" " + text if text.startswith("http") else text for text in inputs]
 
+        encode_kwargs = {**self.default_encode_kwargs, **encode_kwargs}
         return self.model.encode(
             inputs,
             batch_size=batch_size,
