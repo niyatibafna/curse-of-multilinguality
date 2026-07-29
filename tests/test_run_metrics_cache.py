@@ -51,6 +51,9 @@ class EmbeddingCacheTest(unittest.TestCase):
     def test_resolve_pooling_uses_model_default(self):
         self.assertEqual(resolve_pooling("mbert", None), "cls")
         self.assertEqual(resolve_pooling("llama", None), "last_token")
+        self.assertEqual(resolve_pooling("bge-m3", None), "model_default")
+        self.assertEqual(resolve_pooling("multilingual-e5-large", None), "model_default")
+        self.assertEqual(resolve_pooling("jina-v4", None), "model_default")
         self.assertEqual(resolve_pooling("mbert", "mean"), "mean")
 
 
