@@ -45,7 +45,7 @@ same concept:
 
 $$
 \mathcal{U}_{\mathrm{lang}}
-= \operatorname{span}\{x_{c,\ell}-x_{c,\ell'} : \ell \ne \ell'\}.
+= \mathrm{span}\{x_{c,\ell}-x_{c,\ell'} : \ell \ne \ell'\}.
 $$
 
 The **concept subspace** is constructed analogously from different concepts in
@@ -53,7 +53,7 @@ the same language:
 
 $$
 \mathcal{U}_{\mathrm{concept}}
-= \operatorname{span}\{x_{c,\ell}-x_{c',\ell} : c \ne c'\}.
+= \mathrm{span}\{x_{c,\ell}-x_{c',\ell} : c \ne c'\}.
 $$
 
 The construction and scaling metrics are implemented in
@@ -94,21 +94,17 @@ of each subspace's energy. If
 
 $$
 \sigma_i
-= \operatorname{svd}(V_c^\top V_\ell)_i
+= \mathrm{svd}(V_c^\top V_\ell)_i
 = \cos\theta_i,
 $$
 
 then the random-adjusted overlap is
 
 $$
-O_{\mathrm{CL}}
-= \frac{
-\frac{1}{m}\sum_{i=1}^{m}\sigma_i^2
-- \frac{\max(d_c,d_\ell)}{D}
-}{
-1-\frac{\max(d_c,d_\ell)}{D}
-},
-\qquad m=\min(d_c,d_\ell).
+O_{\mathrm{CL}} =
+\frac{m^{-1}\sum_{i=1}^{m}\sigma_i^2 - \max(d_c,d_\ell)/D}
+{1 - \max(d_c,d_\ell)/D},
+\quad m = \min(d_c,d_\ell)
 $$
 
 Higher values indicate greater overlap; zero indicates overlap at the expected
