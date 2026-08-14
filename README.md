@@ -5,24 +5,21 @@ Curse of Multilinguality for Embedding Spaces*. (TODO arxiv link)
 
 Abstract:
 
-> The goal of multilinguality in NLP is to achieve high monolingual performance
-> as well as cross-lingual transfer with a multilingual model with large-scale
-> language coverage. The *curse of multilinguality* describes the phenomenon of
-> degradation in multilingual model performance as we increase language
-> coverage, posing a threat to the above goal. This paper asks whether
-> multilingual embedding spaces are inherently incapable of achieving perfect
-> multilinguality without a catastrophic increase in capacity. We first
-> formalize the Platonic ideal of multilinguality, embodied in three
-> *multilinguality conditions*. We then prove that an embedding space can
-> theoretically maintain the multilinguality conditions for an arbitrary number
-> of languages without a catastrophic increase in dimensionality: that is, that
-> there is no theoretical curse of multilinguality for embedding space
-> structure. This suggests that the empirical curse of multilinguality is a
-> result of real world data and training conditions. We back this understanding
-> with a small-scale empirical study. Our paper provides the first theoretical
-> and intrinsic perspective on the curse of multilinguality, with implications
-> for the scientific understanding of and practical solutions to this
-> phenomenon.
+> In multilingual NLP, we wish to achieve high monolingual performance as well
+> as cross-lingual transfer with a multilingual model with large-scale language
+> coverage. The *curse of multilinguality* describes the degradation in
+> multilingual model performance as we increase language coverage, posing a
+> threat to the above goal. This paper asks whether multilingual embedding
+> spaces are inherently incapable of achieving perfect multilinguality without
+> failure or a catastrophic increase in required capacity. We first formalize
+> the goal of “perfect multilinguality,” embodied in two *multilinguality
+> conditions*. We then prove that an embedding space can theoretically exhibit
+> perfect multilinguality for increasing language coverage without a
+> catastrophic increase in dimensionality. That is, we show that there is no
+> theoretical curse of multilinguality for embedding space structure. This
+> suggests that the empirical curse of multilinguality is a result of real
+> world data and training conditions. We back this understanding with a
+> small-scale empirical study on existing embedding spaces.
 
 This repository contains the code for our empirical study.
 Specifically, we formulate metrics for multilinguality conditions and observe whether they are maintained for models trained from scratch with increasing language coverage.
