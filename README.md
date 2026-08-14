@@ -3,9 +3,29 @@
 This repository contains the code for the project *There Is No Theoretical
 Curse of Multilinguality for Embedding Spaces*. (TODO arxiv link)
 
-We study whether multilingual embedding spaces can preserve high-quality
-monolingual semantics and cross-lingual alignment as the number of languages
-encoded increases. We will measure the empirical curse of multilinguality for embedding structure under controlled variations in training compute, data sampling, and evaluation languages.
+Abstract:
+
+> The goal of multilinguality in NLP is to achieve high monolingual performance
+> as well as cross-lingual transfer with a multilingual model with large-scale
+> language coverage. The *curse of multilinguality* describes the phenomenon of
+> degradation in multilingual model performance as we increase language
+> coverage, posing a threat to the above goal. This paper asks whether
+> multilingual embedding spaces are inherently incapable of achieving perfect
+> multilinguality without a catastrophic increase in capacity. We first
+> formalize the Platonic ideal of multilinguality, embodied in three
+> *multilinguality conditions*. We then prove that an embedding space can
+> theoretically maintain the multilinguality conditions for an arbitrary number
+> of languages without a catastrophic increase in dimensionality: that is, that
+> there is no theoretical curse of multilinguality for embedding space
+> structure. This suggests that the empirical curse of multilinguality is a
+> result of real world data and training conditions. We back this understanding
+> with a small-scale empirical study. Our paper provides the first theoretical
+> and intrinsic perspective on the curse of multilinguality, with implications
+> for the scientific understanding of and practical solutions to this
+> phenomenon.
+
+This repository contains the code for our empirical study.
+Specifically, we formulate metrics for multilinguality conditions and observe whether they are maintained for models trained from scratch with increasing language coverage.
 
 ## Repository structure
 
@@ -13,7 +33,7 @@ encoded increases. We will measure the empirical curse of multilinguality for em
   metrics. See its [README](src/metrics/README.md) for definitions and formulas.
 - [`src/scripts/run_metrics.py`](src/scripts/run_metrics.py): runs metric
   evaluation and writes results to `outputs/`.
-- [`src/data/`](src/data/): loads and formats multilingual evaluation datasets.
+- [`src/data/`](src/data/): loads and formats multiparallel evaluation datasets required for metric evaluation.
 - [`src/models/`](src/models/): embedding-model wrappers and registry.
 - [`src/training/`](src/training/): trains small BERT-style masked language
   models on increasingly large language sets varying compute, data, and target evaluation group settings. See its
