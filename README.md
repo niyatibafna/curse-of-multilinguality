@@ -33,7 +33,7 @@ encoded increases. We will measure the empirical curse of multilinguality for em
 
 ## Trends of empirical curse of multilinguality for embedding space structure
 
-![Main BOUQuET results](misc/paper_figures/figures/main_results_bouquet_by_evaluation.png)
+![Main BOUQuET results](trends/main_results_bouquet_by_curse.png)
 
 
 If you use this code, please cite
